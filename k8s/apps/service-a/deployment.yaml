@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-a
+  namespace: apps
+  labels:
+    app: service-a
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: service-a
+  template:
+    metadata:
+      labels:
+        app: service-a
+        version: "1.0.0"
+      annotations:
+        # Grafana Alloy annotation-based scraping (no ServiceMonitor CRD needed)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: service-a
+          # Updated by CI: ghcr.io/YOUR-GITHUB-ORG/service-a:latest
+          image: ghcr.io/YOUR-GITHUB-ORG/service-a:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SERVICE_NAME
+              value: "service-a"
+            - name: SERVICE_VERSION
+              value: "1.0.0"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://alloy.lgtm.svc.cluster.local:4318"
+            - name: OTEL_SERVICE_NAME
+              value: "service-a"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532        # distroless nonroot UID
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault

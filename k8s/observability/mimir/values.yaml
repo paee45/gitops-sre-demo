@@ -1,0 +1,151 @@
+# Mimir — single-process (monolithic) deployment for demo
+# Chart: grafana/mimir-distributed 6.1.0-weekly.388
+# Using single-binary override to fit in t3.medium
+# Retention: 7 days via compactor_blocks_retention_period
+
+# Override to monolithic single-process mode
+mimir:
+  structuredConfig:
+    common:
+      storage:
+        backend: filesystem
+        filesystem:
+          dir: /data
+
+    limits:
+      compactor_blocks_retention_period: 168h   # 7 days
+      ingestion_rate: 10000
+      ingestion_burst_size: 200000
+      max_global_series_per_user: 1000000
+
+    compactor:
+      compaction_interval: 30m
+      data_dir: /data/compactor
+
+    blocks_storage:
+      backend: filesystem
+      filesystem:
+        dir: /data/blocks
+      tsdb:
+        dir: /data/tsdb
+
+    store_gateway:
+      sharding_enabled: false
+
+    ingester:
+      ring:
+        replication_factor: 1
+
+    distributor:
+      ring:
+        kvstore:
+          store: memberlist
+
+    memberlist:
+      join_members: []
+
+# Run all components as a single Deployment (monolithic)
+# Override individual component replicas to 0 except for the all-in-one
+ingester:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 192Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+  persistentVolume:
+    enabled: true
+    size: 20Gi
+    storageClass: local-path
+  zoneAwareReplication:
+    enabled: false
+
+distributor:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+querier:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+query_frontend:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+store_gateway:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  persistentVolume:
+    enabled: true
+    size: 5Gi
+    storageClass: local-path
+  zoneAwareReplication:
+    enabled: false
+
+compactor:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  persistentVolume:
+    enabled: true
+    size: 5Gi
+    storageClass: local-path
+
+ruler:
+  replicas: 0   # Disable — not needed for demo
+
+alertmanager:
+  enabled: false
+
+# Disable minio — using filesystem
+minio:
+  enabled: false
+
+# Nginx gateway — disabled for simplicity
+nginx:
+  enabled: false
+
+# Disable ServiceMonitor CRDs
+serviceMonitor:
+  enabled: false
+
+metaMonitoring:
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+
+# Expose query-frontend and distributor via ClusterIP
+# Alloy remote_writes to http://mimir-mimir-distributed-distributor:8080/api/v1/push
+# Grafana queries http://mimir-mimir-distributed-query-frontend:8080/prometheus

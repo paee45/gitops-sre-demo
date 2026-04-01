@@ -1,0 +1,177 @@
+# Grafana — Dashboard-ready config with 7 pre-provisioned dashboards
+# Chart: grafana/grafana 10.5.15 — App: v12.3.1
+
+replicas: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+# Expose via NodePort 3000 (opened in SG)
+service:
+  type: NodePort
+  nodePort: 3000
+  port: 80
+  targetPort: 3000
+
+persistence:
+  enabled: true
+  size: 2Gi
+  storageClassName: local-path
+
+# Grafana UI settings
+grafana.ini:
+  server:
+    root_url: "%(protocol)s://%(domain)s:%(http_port)s/"
+  security:
+    admin_user: admin
+    admin_password: demo123       # Change for a real deployment
+    allow_embedding: true
+  users:
+    allow_sign_up: false
+  analytics:
+    reporting_enabled: false
+    check_for_updates: false
+  auth.anonymous:
+    enabled: true
+    org_role: Viewer              # Allow unauthenticated read for demo
+  feature_toggles:
+    enable: traceToMetrics traceToLogs correlations
+
+# ---------------------------------------------------------------------------
+# Datasources — pre-configured on startup
+# ---------------------------------------------------------------------------
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      # Mimir as primary Prometheus-compatible source
+      - name: Mimir
+        uid: mimir
+        type: prometheus
+        url: http://mimir-mimir-distributed-query-frontend.lgtm.svc:8080/prometheus
+        access: proxy
+        isDefault: true
+        jsonData:
+          timeInterval: "60s"
+          httpMethod: GET
+
+      # Loki for logs
+      - name: Loki
+        uid: loki
+        type: loki
+        url: http://loki.lgtm.svc:3100
+        access: proxy
+        jsonData:
+          derivedFields:
+            - datasourceUid: tempo
+              matcherRegex: '"traceID":"(\w+)"'
+              name: TraceID
+              url: "$${__value.raw}"
+
+      # Tempo for traces
+      - name: Tempo
+        uid: tempo
+        type: tempo
+        url: http://tempo.lgtm.svc:3100
+        access: proxy
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: loki
+            spanStartTimeShift: "-1m"
+            spanEndTimeShift: "1m"
+            tags:
+              - key: service.name
+                value: service
+          tracesToMetrics:
+            datasourceUid: mimir
+            tags:
+              - key: service.name
+                value: job
+          serviceMap:
+            datasourceUid: mimir
+          nodeGraph:
+            enabled: true
+
+# ---------------------------------------------------------------------------
+# Dashboards — auto-downloaded from grafana.com on first boot
+# ---------------------------------------------------------------------------
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        folder: "SRE Demo"
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+
+dashboards:
+  default:
+    # --- Infrastructure ---
+    kubernetes-cluster-overview:
+      gnetId: 6417
+      revision: 10
+      datasource: Mimir
+
+    kubernetes-nodes-detail:
+      gnetId: 8171
+      revision: 18
+      datasource: Mimir
+
+    # --- Container Resources (cAdvisor) ---
+    cadvisor-container-resources:
+      gnetId: 14282
+      revision: 1
+      datasource: Mimir
+
+    # --- Logs ---
+    loki-logs-overview:
+      gnetId: 14055
+      revision: 2
+      datasource:
+        - name: DS_PROMETHEUS
+          value: Mimir
+        - name: DS_LOKI
+          value: Loki
+
+    # --- Application RED metrics ---
+    go-app-red-metrics:
+      gnetId: 10127
+      revision: 1
+      datasource: Mimir
+
+    # --- GitOps ---
+    argocd-operational:
+      gnetId: 14584
+      revision: 4
+      datasource: Mimir
+
+    # --- Traces ---
+    tempo-traces-overview:
+      gnetId: 19689
+      revision: 2
+      datasource: Tempo
+
+# ---------------------------------------------------------------------------
+# Sidecar — watch ALL namespaces for ConfigMaps with grafana_dashboard=1
+# Enables adding dashboards via GitOps without redeploying Grafana
+# ---------------------------------------------------------------------------
+sidecar:
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+    searchNamespace: ALL
+    defaultDashboardsEnabled: false
+    resource: configmap
+
+serviceMonitor:
+  enabled: false

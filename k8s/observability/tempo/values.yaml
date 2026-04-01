@@ -1,0 +1,50 @@
+# Tempo — single-binary trace backend
+# Chart: grafana/tempo 1.24.4 — App: v2.9.0
+# Retention: 7 days (168h)
+
+tempo:
+  retention: 168h     # 7 days
+
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+    jaeger:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:14250"
+
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+
+  extraEnv:
+    - name: GOMEMLIMIT
+      value: "345MiB"
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClassName: local-path
+
+serviceMonitor:
+  enabled: false
+
+# Expose OTLP ports via ClusterIP service
+service:
+  type: ClusterIP

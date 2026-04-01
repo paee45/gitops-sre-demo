@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-app
+  namespace: argocd
+  # Cascade-delete all child apps when this app is deleted
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # Update repoURL after forking / cloning this repo
+    repoURL: https://github.com/YOUR-GITHUB-ORG/gitops-sre-demo.git
+    targetRevision: HEAD
+    # ArgoCD watches this directory for child Application manifests
+    path: k8s
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true       # Remove K8s resources deleted from Git
+      selfHeal: true    # Auto-correct any manual drift
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

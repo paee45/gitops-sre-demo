@@ -1,0 +1,16 @@
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/tfplan
+terraform/*.tfvars
+!terraform/terraform.tfvars.example
+
+# Go build artifacts
+src/*/bin/
+src/*/*.exe
+
+# OS
+.DS_Store
+*.swp

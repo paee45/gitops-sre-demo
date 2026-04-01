@@ -1,0 +1,53 @@
+# Grafana Alloy — unified collector (metrics + logs + traces)
+# Chart: grafana/alloy 1.6.2 — App: v1.14.0
+# Deployed as DaemonSet — one pod per node (single node in this demo)
+
+controller:
+  type: daemonset
+
+alloy:
+  configMap:
+    create: true
+    # Content loaded from config.alloy in the same directory
+    # ArgoCD multi-source handles the file embedding
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+  # RBAC — Alloy needs to read pods, nodes, endpoints for service discovery
+  # and access kubelet for cAdvisor metrics
+  mounts:
+    # Mount the Alloy River config
+    extra:
+      - name: alloy-config
+        mountPath: /etc/alloy
+        readOnly: true
+
+serviceAccount:
+  create: true
+  name: alloy
+
+# ClusterRole to read pods, nodes, endpoints, namespaces
+rbac:
+  create: true
+
+# Expose OTLP endpoints for the Go services to send traces to
+service:
+  type: ClusterIP
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+
+serviceMonitor:
+  enabled: false

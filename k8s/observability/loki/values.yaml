@@ -1,0 +1,95 @@
+# Loki — SingleBinary mode (monolithic) for demo on single K3s node
+# Chart: grafana/loki 6.55.0 — App: v3.6.7
+# Retention: 7 days (168h) enforced by compactor
+
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+
+  commonConfig:
+    replication_factor: 1
+
+  storage:
+    type: filesystem
+
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+
+  limits_config:
+    retention_period: 168h          # 7 days
+    max_global_streams_per_user: 10000
+    ingestion_rate_mb: 16
+    ingestion_burst_size_mb: 32
+    max_query_lookback: 720h        # 30 days max lookback
+
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+    retention_delete_delay: 2h
+    retention_delete_worker_count: 150
+    compaction_interval: 10m
+
+singleBinary:
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: local-path
+
+  extraEnv:
+    - name: GOMEMLIMIT
+      value: "460MiB"   # ~90% of memory limit — Go GOMEMLIMIT pattern
+
+# Disable read/write/backend split (not needed for SingleBinary)
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+# Disable minio (use filesystem)
+minio:
+  enabled: false
+
+# Loki canary — disable for resource savings
+lokiCanary:
+  enabled: false
+
+# Monitoring sidecar — disable for resource savings
+monitoring:
+  selfMonitoring:
+    enabled: false
+  serviceMonitor:
+    enabled: false
+  lokiCanary:
+    enabled: false
+  dashboards:
+    enabled: false
+  rules:
+    enabled: false
+  alerts:
+    enabled: false
+
+gateway:
+  enabled: false
+
+test:
+  enabled: false

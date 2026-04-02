@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
         - name: service-b
-          image: ghcr.io/YOUR-GITHUB-ORG/service-b:latest
+          image: ghcr.io/paee45/service-b:latest
           imagePullPolicy: Always
           ports:
             - name: http

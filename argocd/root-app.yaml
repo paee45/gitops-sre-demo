@@ -11,7 +11,7 @@ spec:
 
   source:
     # Update repoURL after forking / cloning this repo
-    repoURL: https://github.com/YOUR-GITHUB-ORG/gitops-sre-demo.git
+    repoURL: https://github.com/paee45/gitops-sre-demo.git
     targetRevision: HEAD
     # ArgoCD watches this directory for child Application manifests
     path: k8s

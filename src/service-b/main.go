@@ -1,7 +1,4 @@
-package serviceb
-// service-b — Background worker simulator
-// Generates synthetic Prometheus metrics, structured JSON logs (slog), and OTLP traces.
-// Does NOT serve application traffic; simulates queue-processing / cron-style workloads.
+// service-b - Background worker simulator
 package main
 
 import (
@@ -9,248 +6,122 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}	}		logger.Error("server shutdown error", "error", err)	if err := srv.Shutdown(shutdownCtx); err != nil {	defer cancel()	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)	logger.Info("shutting down")	<-ctx.Done()	go runWorker(ctx, logger)	// Start the worker loop	}()		}			os.Exit(1)			logger.Error("server error", "error", err)		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {		logger.Info("service-b started", "addr", ":8080")	go func() {	}		IdleTimeout:  60 * time.Second,		WriteTimeout: 15 * time.Second,		ReadTimeout:  10 * time.Second,		Handler:      mux,		Addr:         ":8080",	srv := &http.Server{	})		fmt.Fprint(w, "OK")		w.WriteHeader(http.StatusOK)	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {	mux.Handle("/metrics", promhttp.Handler())	mux := http.NewServeMux()	// Minimal HTTP server for /metrics and /healthz	}()		}			logger.Error("tracer shutdown error", "error", err)		if err := tp.Shutdown(shutdownCtx); err != nil {		defer cancel()		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)	defer func() {	}		os.Exit(1)		logger.Error("failed to init tracer", "error", err)	if err != nil {	tp, err := initTracer(ctx)	// Initialize tracing	defer stop()	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)	slog.SetDefault(logger)	}))		Level: slog.LevelInfo,	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{func main() {// ---------------------------------------------------------------------------// Main// ---------------------------------------------------------------------------}	queueDepth.WithLabelValues(jobType).Add(delta)	delta := float64(rand.Intn(5)) - 2	// Randomly fluctuate simulated queue depth	jobDuration.WithLabelValues(jobType).Observe(time.Since(start).Seconds())	jobsProcessed.WithLabelValues(jobType, status).Inc()	}		)			"traceID", span.SpanContext().TraceID().String(),			"duration_ms", time.Since(start).Milliseconds(),			"job_type", jobType,		logger.InfoContext(ctx, "job completed",		}			jobFailures.WithLabelValues(jobType).Set(0)			failureState[jobType] = 0		if failureState[jobType] > 0 {	} else {		)			"traceID", span.SpanContext().TraceID().String(),			"duration_ms", time.Since(start).Milliseconds(),			"consecutive_failures", failureState[jobType],			"job_type", jobType,		logger.ErrorContext(ctx, "job failed",		span.SetAttributes(attribute.Bool("error", true))		jobFailures.WithLabelValues(jobType).Set(failureState[jobType])		failureState[jobType]++		status = "failure"	if rand.Float64() < 0.06 {	status := "success"	// 6% failure rate	time.Sleep(duration)	duration := time.Duration(5+rand.Intn(2995)) * time.Millisecond	// Simulate variable job duration: 5ms–3s	defer span.End()	)		),			attribute.String("worker.id", getEnv("HOSTNAME", "worker-0")),			attribute.String("job.type", jobType),		trace.WithAttributes(	_, span := tracer.Start(ctx, "process-job",	start := time.Now()func processJob(ctx context.Context, tracer trace.Tracer, logger *slog.Logger, jobType string) {}	}		}			}				go processJob(ctx, tracer, logger, jobType)				jobType := jobType // capture for goroutine			for _, jobType := range jobTypes {			// Process one job of each type per tick		case <-ticker.C:			return		case <-ctx.Done():		select {	for {	}		queueDepth.WithLabelValues(jt).Set(float64(rand.Intn(20)))	for _, jt := range jobTypes {	// Initialise queue depth gauges with random baseline	defer ticker.Stop()	ticker := time.NewTicker(5 * time.Second)	tracer := otel.Tracer("service-b/worker")func runWorker(ctx context.Context, logger *slog.Logger) {// ---------------------------------------------------------------------------// Worker loop// ---------------------------------------------------------------------------var failureState = map[string]float64{}// failureState tracks consecutive failures per job type (reset on success)var jobTypes = []string{"invoice-renderer", "notification-sender", "report-aggregator", "cache-warmer"}// job types simulated by this worker}	return fallback	}		return v	if v := os.Getenv(key); v != "" {func getEnv(key, fallback string) string {// ---------------------------------------------------------------------------// Helpers// ---------------------------------------------------------------------------}	return tp, nil	))		propagation.Baggage{},		propagation.TraceContext{},	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(	otel.SetTracerProvider(tp)	)		sdktrace.WithSampler(sdktrace.AlwaysSample()),		sdktrace.WithResource(res),		sdktrace.WithBatcher(exporter),	tp := sdktrace.NewTracerProvider(	}		return nil, fmt.Errorf("create resource: %w", err)	if err != nil {	)		),			attribute.String("deployment.environment", "demo"),			semconv.ServiceVersion(getEnv("SERVICE_VERSION", "1.0.0")),			semconv.ServiceName(getEnv("OTEL_SERVICE_NAME", "service-b")),		resource.WithAttributes(	res, err := resource.New(ctx,	}		return nil, fmt.Errorf("create OTLP exporter: %w", err)	if err != nil {	)		otlptracehttp.WithInsecure(),		otlptracehttp.WithEndpoint(endpoint),	exporter, err := otlptracehttp.New(ctx,	endpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4318")func initTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {// ---------------------------------------------------------------------------// Tracing init// ---------------------------------------------------------------------------)	}, []string{"job_type"})		Help: "Simulated queue depth for each job type",		Name: "worker_queue_depth",	queueDepth = promauto.NewGaugeVec(prometheus.GaugeOpts{	}, []string{"job_type"})		Buckets: []float64{0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0},		Help:    "Time taken to process a single job",		Name:    "job_duration_seconds",	jobDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{	}, []string{"job_type"})		Help: "Current count of consecutive failures per job type",		Name: "job_failures_current",	jobFailures = promauto.NewGaugeVec(prometheus.GaugeOpts{	}, []string{"job_type", "status"})		Help: "Total number of jobs processed by this worker",		Name: "jobs_processed_total",	jobsProcessed = promauto.NewCounterVec(prometheus.CounterOpts{var (// ---------------------------------------------------------------------------// Prometheus metrics// ---------------------------------------------------------------------------)	"go.opentelemetry.io/otel/trace"	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"	sdktrace "go.opentelemetry.io/otel/sdk/trace"	"go.opentelemetry.io/otel/sdk/resource"	"go.opentelemetry.io/otel/propagation"	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"	"go.opentelemetry.io/otel/attribute"	"go.opentelemetry.io/otel"	"github.com/prometheus/client_golang/prometheus/promhttp"	"github.com/prometheus/client_golang/prometheus/promauto"	"github.com/prometheus/client_golang/prometheus"	"time"	"syscall"	"os/signal"	"os"	"net/http"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var (
+	jobsProcessed = promauto.NewCounterVec(prometheus.CounterOpts{Name: "jobs_processed_total", Help: "Total jobs processed"}, []string{"job_type", "status"})
+	jobFailures   = promauto.NewGaugeVec(prometheus.GaugeOpts{Name: "job_failures_current", Help: "Consecutive failures"}, []string{"job_type"})
+	jobDuration   = promauto.NewHistogramVec(prometheus.HistogramOpts{Name: "job_duration_seconds", Help: "Job processing time", Buckets: []float64{0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0}}, []string{"job_type"})
+	queueDepth    = promauto.NewGaugeVec(prometheus.GaugeOpts{Name: "worker_queue_depth", Help: "Simulated queue depth"}, []string{"job_type"})
+)
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func initTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
+	ep := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4318")
+	exporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint(ep), otlptracehttp.WithInsecure())
+	if err != nil { return nil, fmt.Errorf("create OTLP exporter: %w", err) }
+	res, err := resource.New(ctx, resource.WithAttributes(
+		semconv.ServiceName(getEnv("OTEL_SERVICE_NAME", "service-b")),
+		semconv.ServiceVersion(getEnv("SERVICE_VERSION", "1.0.0")),
+		attribute.String("deployment.environment", "demo"),
+	))
+	if err != nil { return nil, fmt.Errorf("create resource: %w", err) }
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter), sdktrace.WithResource(res), sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	return tp, nil
+}
+
+var jobTypes = []string{"invoice-renderer", "notification-sender", "report-aggregator", "cache-warmer"}
+var failureState = map[string]float64{}
+
+func processJob(ctx context.Context, tracer trace.Tracer, logger *slog.Logger, jobType string) {
+	start := time.Now()
+	_, span := tracer.Start(ctx, "process-job", trace.WithAttributes(
+		attribute.String("job.type", jobType),
+		attribute.String("worker.id", getEnv("HOSTNAME", "worker-0")),
+	))
+	defer span.End()
+	time.Sleep(time.Duration(5+rand.Intn(2995)) * time.Millisecond)
+	status := "success"
+	if rand.Float64() < 0.06 {
+		status = "failure"
+		failureState[jobType]++
+		jobFailures.WithLabelValues(jobType).Set(failureState[jobType])
+		span.SetAttributes(attribute.Bool("error", true))
+		logger.ErrorContext(ctx, "job failed", "job_type", jobType, "consecutive_failures", failureState[jobType], "duration_ms", time.Since(start).Milliseconds(), "traceID", span.SpanContext().TraceID().String())
+	} else {
+		if failureState[jobType] > 0 { failureState[jobType] = 0; jobFailures.WithLabelValues(jobType).Set(0) }
+		logger.InfoContext(ctx, "job completed", "job_type", jobType, "duration_ms", time.Since(start).Milliseconds(), "traceID", span.SpanContext().TraceID().String())
+	}
+	jobsProcessed.WithLabelValues(jobType, status).Inc()
+	jobDuration.WithLabelValues(jobType).Observe(time.Since(start).Seconds())
+	queueDepth.WithLabelValues(jobType).Add(float64(rand.Intn(5)) - 2)
+}
+
+func runWorker(ctx context.Context, logger *slog.Logger) {
+	tracer := otel.Tracer("service-b/worker")
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for _, jt := range jobTypes { queueDepth.WithLabelValues(jt).Set(float64(rand.Intn(20))) }
+	for {
+		select {
+		case <-ctx.Done(): return
+		case <-ticker.C:
+			for _, jt := range jobTypes { jt := jt; go processJob(ctx, tracer, logger, jt) }
+		}
+	}
+}
+
+func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(logger)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	tp, err := initTracer(ctx)
+	if err != nil { logger.Error("failed to init tracer", "error", err); os.Exit(1) }
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		tp.Shutdown(c)
+	}()
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK); fmt.Fprint(w, "OK") })
+	srv := &http.Server{Addr: ":8080", Handler: mux, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
+	go func() {
+		logger.Info("service-b started", "addr", ":8080")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("server error", "error", err); os.Exit(1)
+		}
+	}()
+	go runWorker(ctx, logger)
+	<-ctx.Done()
+	logger.Info("shutting down")
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	srv.Shutdown(c)
+}

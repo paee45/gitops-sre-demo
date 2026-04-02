@@ -87,7 +87,7 @@ Required fields:
 aws_region            = "us-east-1"
 key_name              = "your-ec2-keypair"
 allowed_ssh_cidr      = ["1.2.3.4/32"]   # your IP
-github_org            = "myorg"
+github_org            = "paee45"
 github_repo           = "gitops-sre-demo"
 tf_state_bucket       = "my-tf-state"
 tf_state_dynamodb_table = "my-tf-locks"

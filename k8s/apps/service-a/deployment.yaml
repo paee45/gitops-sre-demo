@@ -24,8 +24,8 @@ spec:
     spec:
       containers:
         - name: service-a
-          # Updated by CI: ghcr.io/YOUR-GITHUB-ORG/service-a:latest
-          image: ghcr.io/YOUR-GITHUB-ORG/service-a:latest
+          # Updated by CI: ghcr.io/paee45/service-a:latest
+          image: ghcr.io/paee45/service-a:latest
           imagePullPolicy: Always
           ports:
             - name: http

@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/YOUR-GITHUB-ORG/gitops-sre-demo.git
+    repoURL: https://github.com/paee45/gitops-sre-demo.git
     targetRevision: HEAD
     path: k8s/apps/service-b
   destination:

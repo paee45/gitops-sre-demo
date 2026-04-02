@@ -23,7 +23,7 @@ spec:
         releaseName: loki
         valueFiles:
           - $values/k8s/observability/loki/values.yaml
-    - repoURL: https://github.com/YOUR-GITHUB-ORG/gitops-sre-demo.git
+    - repoURL: https://github.com/paee45/gitops-sre-demo.git
       targetRevision: HEAD
       ref: values
   destination:

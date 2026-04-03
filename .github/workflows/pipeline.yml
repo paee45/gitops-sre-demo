@@ -5,25 +5,35 @@ on:
     branches: [main]
     paths:
       - "terraform/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
   workflow_dispatch:
 
 permissions:
   id-token: write   # Required for OIDC token exchange
   contents: read
+  pull-requests: write  # Allow posting plan output as PR comment
 
 env:
   TF_VERSION: "~1.7"
   AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_VAR_aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
   TF_VAR_github_org: ${{ github.repository_owner }}
   TF_VAR_github_repo: ${{ github.event.repository.name }}
   TF_VAR_tf_state_bucket: ${{ vars.TF_STATE_BUCKET }}
   TF_VAR_tf_state_dynamodb_table: ${{ vars.TF_STATE_DYNAMODB_TABLE }}
 
+# ─────────────────────────────────────────────────────────────────
+# JOB 1: Plan — runs on every push and every PR
+#   Uses a read-only OIDC role (AWS_PLAN_ROLE_ARN).
+#   Posts the plan diff as a PR comment.
+# ─────────────────────────────────────────────────────────────────
 jobs:
-  terraform:
-    name: Plan & Apply
+  plan:
+    name: Terraform Plan
     runs-on: ubuntu-latest
-    environment: production
 
     defaults:
       run:
@@ -33,12 +43,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials via OIDC
+      - name: Verify AWS account identity (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-Terraform
+          role-session-name: GitHubActions-TerraformPlan
+
+      - name: Confirm AWS account matches expected
+        run: |
+          ACTUAL=$(aws sts get-caller-identity --query Account --output text)
+          echo "Active AWS account: $ACTUAL"
+          if [ "$ACTUAL" != "${{ secrets.AWS_ACCOUNT_ID }}" ]; then
+            echo "ERROR: wrong account! Expected ${{ secrets.AWS_ACCOUNT_ID }}, got $ACTUAL"
+            exit 1
+          fi
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -57,7 +76,83 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        run: terraform plan -out=tfplan -input=false
+        run: terraform plan -no-color -out=tfplan -input=false 2>&1 | tee plan.txt
+
+      - name: Post plan as PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/plan.txt', 'utf8').slice(0, 65000);
+            const body = `### Terraform Plan\n\`\`\`hcl\n${plan}\n\`\`\``;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/tfplan
+          retention-days: 1
+
+# ─────────────────────────────────────────────────────────────────
+# JOB 2: Apply — runs only on push to main, needs manual approval
+#   Uses a separate apply OIDC role (AWS_ROLE_ARN) with write perms.
+#   Requires the "production" GitHub Environment (set up approval there).
+# ─────────────────────────────────────────────────────────────────
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production   # ← configure required reviewers here in GitHub UI
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC (apply role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-TerraformApply
+
+      - name: Confirm AWS account matches expected
+        run: |
+          ACTUAL=$(aws sts get-caller-identity --query Account --output text)
+          echo "Active AWS account: $ACTUAL"
+          if [ "$ACTUAL" != "${{ secrets.AWS_ACCOUNT_ID }}" ]; then
+            echo "ERROR: wrong account! Expected ${{ secrets.AWS_ACCOUNT_ID }}, got $ACTUAL"
+            exit 1
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ vars.TF_STATE_DYNAMODB_TABLE }}"
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/
 
       - name: Terraform Apply
         run: terraform apply -auto-approve -input=false tfplan

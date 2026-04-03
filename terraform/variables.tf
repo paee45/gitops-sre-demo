@@ -1,3 +1,9 @@
+variable "aws_account_id" {
+  description = "Your personal AWS account ID. Prevents accidental deploys to the wrong account. Leave empty to skip."
+  type        = string
+  default     = ""
+}
+
 variable "aws_region" {
   description = "AWS region to deploy into"
   type        = string
@@ -8,12 +14,6 @@ variable "instance_type" {
   description = "EC2 instance type. t3.medium (4 GB) is default. Upgrade to t3.large if OOM."
   type        = string
   default     = "t3.medium"
-}
-
-variable "key_name" {
-  description = "Name of an existing EC2 key pair for SSH access. Leave empty to skip key attachment."
-  type        = string
-  default     = ""
 }
 
 variable "allowed_ssh_cidr" {

@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  GitOps SRE Demo — Terraform remote state backend.
+  Creates the S3 bucket (Object Lock, versioning, SSE, public-access block)
+  and DynamoDB lock table needed before running `terraform init` on the main config.
+  CloudFormation manages its own state inside AWS — no local state file required.
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: paee45-gitops-sre-tf-state
+    Description: S3 bucket name for Terraform state
+
+  TableName:
+    Type: String
+    Default: terraform-state-lock
+    Description: DynamoDB table name for Terraform state locking
+
+  ProjectName:
+    Type: String
+    Default: gitops-sre-demo
+    Description: Project tag applied to all resources
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # S3 — Terraform state bucket
+  # Object Lock must be enabled at creation time (cannot be added later).
+  # GOVERNANCE mode: object versions are protected for 30 days after upload.
+  # ---------------------------------------------------------------------------
+
+  TFStateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain          # never delete via CloudFormation — state is inside
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: 30
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: ManagedBy
+          Value: cloudformation
+        - Key: Purpose
+          Value: terraform-state-backend
+
+  # ---------------------------------------------------------------------------
+  # DynamoDB — state lock table
+  # ---------------------------------------------------------------------------
+
+  TFStateLockTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: LockID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: LockID
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: ManagedBy
+          Value: cloudformation
+        - Key: Purpose
+          Value: terraform-state-backend
+
+Outputs:
+
+  TFStateBucket:
+    Description: S3 bucket name — set as TF_STATE_BUCKET in GitHub Variables
+    Value: !Ref TFStateBucket
+
+  TFStateDynamoDBTable:
+    Description: DynamoDB table name — set as TF_STATE_DYNAMODB_TABLE in GitHub Variables
+    Value: !Ref TFStateLockTable
+
+  BackendInitCommand:
+    Description: Run this to initialise the main Terraform config
+    Value: !Sub |
+      terraform init \
+        -backend-config="bucket=${TFStateBucket}" \
+        -backend-config="key=gitops-sre-demo/terraform.tfstate" \
+        -backend-config="region=${AWS::Region}" \
+        -backend-config="dynamodb_table=${TFStateLockTable}"

@@ -1,0 +1,100 @@
+# Bootstrap Terraform Backend
+#
+# ONE-TIME workflow — run this BEFORE pipeline.yml can work.
+# Deploys a CloudFormation stack that creates the S3 bucket and DynamoDB table
+# used by the main Terraform config as its remote backend.
+#
+# Why CloudFormation here instead of Terraform?
+#   CloudFormation stores its own state inside AWS — no local state file needed.
+#   This breaks the chicken-and-egg problem: Terraform needs an S3 bucket to
+#   store state, but creating that bucket via Terraform requires state to already
+#   exist. CloudFormation has no such dependency.
+#
+# Prerequisites (one-time):
+#   1. Create a dedicated IAM user `terraform-bootstrap` with the policy in
+#      terraform/bootstrap/main.tf (aws_iam_policy.bootstrap_user).
+#   2. Generate an access key for that user.
+#   3. Add two GitHub Secrets to this repo:
+#        AWS_BOOTSTRAP_ACCESS_KEY_ID
+#        AWS_BOOTSTRAP_SECRET_ACCESS_KEY
+#   4. After this workflow succeeds, delete the access key and detach the policy —
+#      all further AWS writes go through the OIDC role created by pipeline.yml.
+#
+# Trigger: manual only (Actions → Bootstrap Terraform Backend → Run workflow)
+
+name: Bootstrap Terraform Backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      bucket_name:
+        description: S3 bucket name for Terraform state
+        required: true
+        default: paee45-gitops-sre-tf-state
+      table_name:
+        description: DynamoDB table name for state locking
+        required: true
+        default: terraform-state-lock
+      aws_region:
+        description: AWS region
+        required: true
+        default: us-east-1
+      stack_name:
+        description: CloudFormation stack name
+        required: true
+        default: gitops-sre-demo-tf-backend
+
+jobs:
+  bootstrap:
+    name: Deploy CFN backend stack
+    runs-on: ubuntu-latest
+    # No environment gate — this runs once before the OIDC roles exist.
+    # The static credentials are deleted after this run.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (bootstrap user — static, one-time only)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_BOOTSTRAP_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Verify AWS identity
+        run: |
+          echo "Active identity:"
+          aws sts get-caller-identity
+
+      - name: Deploy CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --template-file terraform/bootstrap/cfn-backend.yaml \
+            --stack-name "${{ inputs.stack_name }}" \
+            --parameter-overrides \
+              BucketName="${{ inputs.bucket_name }}" \
+              TableName="${{ inputs.table_name }}" \
+              ProjectName=gitops-sre-demo \
+            --region "${{ inputs.aws_region }}" \
+            --no-fail-on-empty-changeset
+
+      - name: Show stack outputs
+        run: |
+          echo ""
+          echo "════════════════════════════════════════════════════════════════"
+          echo "  Bootstrap complete. Copy these values into GitHub:"
+          echo "════════════════════════════════════════════════════════════════"
+          aws cloudformation describe-stacks \
+            --stack-name "${{ inputs.stack_name }}" \
+            --region "${{ inputs.aws_region }}" \
+            --query 'Stacks[0].Outputs' \
+            --output table
+          echo ""
+          echo "  Next steps:"
+          echo "  1. Set GitHub Variable  TF_STATE_BUCKET        = ${{ inputs.bucket_name }}"
+          echo "  2. Set GitHub Variable  TF_STATE_DYNAMODB_TABLE = ${{ inputs.table_name }}"
+          echo "  3. Delete the AWS_BOOTSTRAP_ACCESS_KEY_ID / SECRET from GitHub Secrets"
+          echo "  4. Delete the IAM access key in the AWS Console"
+          echo "  5. Push a commit touching terraform/** to trigger pipeline.yml"
+          echo "════════════════════════════════════════════════════════════════"

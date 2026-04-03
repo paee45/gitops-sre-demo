@@ -144,6 +144,140 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 # ---------------------------------------------------------------------------
+# Permission Boundary — caps max permissions any IAM role/user created by
+# Terraform can ever hold. Prevents privilege escalation even if the
+# github-actions role is fully compromised.
+# Every aws_iam_role in this file must reference this boundary.
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "permission_boundary" {
+  # EC2 operations only (this project never needs more)
+  statement {
+    sid    = "EC2"
+    effect = "Allow"
+    actions = [
+      "ec2:*",
+    ]
+    resources = ["*"]
+  }
+
+  # Least-set IAM: only PassRole, only to the EC2 instance role
+  statement {
+    sid    = "IAMPassRole"
+    effect = "Allow"
+    actions = ["iam:PassRole"]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-ec2-instance",
+    ]
+  }
+
+  # IAM read (for terraform plan)
+  statement {
+    sid    = "IAMRead"
+    effect = "Allow"
+    actions = [
+      "iam:Get*",
+      "iam:List*",
+    ]
+    resources = ["*"]
+  }
+
+  # Terraform state
+  statement {
+    sid    = "TerraformState"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+      "s3:ListBucket",
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+    ]
+    resources = [
+      "arn:aws:s3:::${var.tf_state_bucket}",
+      "arn:aws:s3:::${var.tf_state_bucket}/*",
+      "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${var.tf_state_dynamodb_table}",
+    ]
+  }
+
+  # Secrets Manager — SSH key only
+  statement {
+    sid    = "SecretsManager"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:DeleteSecret",
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:ListSecretVersionIds",
+      "secretsmanager:PutSecretValue",
+      "secretsmanager:RestoreSecret",
+      "secretsmanager:TagResource",
+      "secretsmanager:UpdateSecret",
+    ]
+    resources = [
+      "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${var.project_name}/*",
+    ]
+  }
+
+  # SSM — required for AmazonSSMManagedInstanceCore to function on the EC2 instance
+  # Without this the boundary would zero-out all SSM permissions (effective = policy ∩ boundary)
+  statement {
+    sid    = "SSM"
+    effect = "Allow"
+    actions = [
+      "ssm:DescribeAssociation",
+      "ssm:GetDeployablePatchSnapshotForInstance",
+      "ssm:GetDocument",
+      "ssm:DescribeDocument",
+      "ssm:GetManifest",
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:ListAssociations",
+      "ssm:ListInstanceAssociations",
+      "ssm:PutInventory",
+      "ssm:PutComplianceItems",
+      "ssm:PutConfigurePackageResult",
+      "ssm:UpdateAssociationStatus",
+      "ssm:UpdateInstanceAssociationStatus",
+      "ssm:UpdateInstanceInformation",
+      "ssmmessages:CreateControlChannel",
+      "ssmmessages:CreateDataChannel",
+      "ssmmessages:OpenControlChannel",
+      "ssmmessages:OpenDataChannel",
+      "ec2messages:AcknowledgeMessage",
+      "ec2messages:DeleteMessage",
+      "ec2messages:FailMessage",
+      "ec2messages:GetEndpoint",
+      "ec2messages:GetMessages",
+      "ec2messages:SendReply",
+    ]
+    resources = ["*"]
+  }
+
+  # STS — required for OIDC and caller-identity checks
+  statement {
+    sid    = "STS"
+    effect = "Allow"
+    actions = ["sts:GetCallerIdentity", "sts:AssumeRoleWithWebIdentity"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "permission_boundary" {
+  name        = "${var.project_name}-permission-boundary"
+  description = "Maximum permissions cap — attached as boundary on every IAM role this project creates"
+  policy      = data.aws_iam_policy_document.permission_boundary.json
+
+  tags = {
+    Name = "${var.project_name}-permission-boundary"
+  }
+}
+
+# ---------------------------------------------------------------------------
 # IAM Role — APPLY role (main branch only, full write permissions)
 # ---------------------------------------------------------------------------
 
@@ -173,8 +307,9 @@ data "aws_iam_policy_document" "github_actions_assume" {
 }
 
 resource "aws_iam_role" "github_actions" {
-  name               = "${var.project_name}-github-actions"
-  assume_role_policy = data.aws_iam_policy_document.github_actions_assume.json
+  name                 = "${var.project_name}-github-actions"
+  assume_role_policy   = data.aws_iam_policy_document.github_actions_assume.json
+  permissions_boundary = aws_iam_policy.permission_boundary.arn
 
   tags = {
     Name = "${var.project_name}-github-actions"
@@ -211,8 +346,9 @@ data "aws_iam_policy_document" "github_plan_assume" {
 }
 
 resource "aws_iam_role" "github_plan" {
-  name               = "${var.project_name}-github-plan"
-  assume_role_policy = data.aws_iam_policy_document.github_plan_assume.json
+  name                 = "${var.project_name}-github-plan"
+  assume_role_policy   = data.aws_iam_policy_document.github_plan_assume.json
+  permissions_boundary = aws_iam_policy.permission_boundary.arn
 
   tags = {
     Name = "${var.project_name}-github-plan"
@@ -446,8 +582,9 @@ data "aws_iam_policy_document" "ec2_assume" {
 }
 
 resource "aws_iam_role" "ec2_instance" {
-  name               = "${var.project_name}-ec2-instance"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume.json
+  name                 = "${var.project_name}-ec2-instance"
+  assume_role_policy   = data.aws_iam_policy_document.ec2_assume.json
+  permissions_boundary = aws_iam_policy.permission_boundary.arn
 
   tags = {
     Name = "${var.project_name}-ec2-instance"

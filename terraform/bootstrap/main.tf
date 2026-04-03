@@ -70,9 +70,29 @@ resource "null_resource" "account_guard" {
 resource "aws_s3_bucket" "tf_state" {
   bucket = var.tf_state_bucket
 
+  # Object Lock must be enabled at bucket creation time — cannot be added later.
+  # GOVERNANCE mode: prevents deletion without s3:BypassGovernanceRetention permission.
+  # Protects state files from accidental `terraform destroy` of the bucket itself.
+  object_lock_enabled = true
+
   # Prevent accidental deletion of the bucket while state files exist
   lifecycle {
     prevent_destroy = true
+  }
+}
+
+# Default retention: GOVERNANCE mode, 30 days.
+# This means every object version is protected for 30 days after upload.
+# Terraform state objects are re-uploaded on every apply — the 30-day window
+# gives you a safe recovery window if state is accidentally overwritten.
+resource "aws_s3_bucket_object_lock_configuration" "tf_state" {
+  bucket = aws_s3_bucket.tf_state.id
+
+  rule {
+    default_retention {
+      mode = "GOVERNANCE"
+      days = 30
+    }
   }
 }
 
@@ -101,6 +121,88 @@ resource "aws_s3_bucket_public_access_block" "tf_state" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+# ---------------------------------------------------------------------------
+# Bootstrap IAM policy — attach this to the human/role that runs bootstrap.
+# Replace AdministratorAccess with this policy: it is the MINIMUM needed to
+# run `terraform apply` in this bootstrap directory.
+# After bootstrap completes, all further writes go through GitHub Actions OIDC.
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "bootstrap_user" {
+  # Must be able to verify which account is active
+  statement {
+    sid    = "STS"
+    effect = "Allow"
+    actions = ["sts:GetCallerIdentity"]
+    resources = ["*"]
+  }
+
+  # Create/manage the S3 state bucket and its settings
+  statement {
+    sid    = "S3StateBucket"
+    effect = "Allow"
+    actions = [
+      "s3:CreateBucket",
+      "s3:DeleteBucket",
+      "s3:GetAccelerateConfiguration",
+      "s3:GetBucketAcl",
+      "s3:GetBucketCORS",
+      "s3:GetBucketLogging",
+      "s3:GetBucketObjectLockConfiguration",
+      "s3:GetBucketPolicy",
+      "s3:GetBucketPolicyStatus",
+      "s3:GetBucketPublicAccessBlock",
+      "s3:GetBucketRequestPayment",
+      "s3:GetBucketTagging",
+      "s3:GetBucketVersioning",
+      "s3:GetBucketWebsite",
+      "s3:GetEncryptionConfiguration",
+      "s3:GetLifecycleConfiguration",
+      "s3:GetReplicationConfiguration",
+      "s3:ListAllMyBuckets",
+      "s3:ListBucket",
+      "s3:PutBucketObjectLockConfiguration",  # required to set Object Lock rules
+      "s3:PutBucketPublicAccessBlock",
+      "s3:PutBucketTagging",
+      "s3:PutBucketVersioning",
+      "s3:PutEncryptionConfiguration",
+      "s3:BypassGovernanceRetention",          # required to delete GOVERNANCE-locked objects (cleanup)
+    ]
+    resources = [
+      "arn:aws:s3:::${var.tf_state_bucket}",
+      "arn:aws:s3:::${var.tf_state_bucket}/*",
+    ]
+  }
+
+  # Create/manage the DynamoDB lock table
+  statement {
+    sid    = "DynamoDBLockTable"
+    effect = "Allow"
+    actions = [
+      "dynamodb:CreateTable",
+      "dynamodb:DeleteTable",
+      "dynamodb:DescribeTable",
+      "dynamodb:DescribeTimeToLive",
+      "dynamodb:ListTagsOfResource",
+      "dynamodb:TagResource",
+      "dynamodb:UpdateTable",
+    ]
+    resources = [
+      "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${var.tf_state_dynamodb_table}",
+    ]
+  }
+}
+
+resource "aws_iam_policy" "bootstrap_user" {
+  name        = "${var.project_name}-bootstrap-user-policy"
+  description = "Minimum permissions to run terraform/bootstrap — replaces AdministratorAccess"
+  policy      = data.aws_iam_policy_document.bootstrap_user.json
+
+  tags = {
+    Name = "${var.project_name}-bootstrap-user-policy"
+  }
 }
 
 # ---------------------------------------------------------------------------

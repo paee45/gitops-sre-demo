@@ -29,10 +29,10 @@ server:
   resources:
     requests:
       cpu: 50m
-      memory: 64Mi
+      memory: 128Mi
     limits:
       cpu: 250m
-      memory: 256Mi
+      memory: 512Mi
   extraArgs:
     - --insecure   # Plain HTTP — fine for demo; add TLS termination for prod
 

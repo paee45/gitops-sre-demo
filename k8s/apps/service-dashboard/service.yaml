@@ -1,5 +1,5 @@
 ---
-# Service Dashboard Service (NodePort)
+# Service Dashboard Service (ClusterIP - accessed via kubectl port-forward or Ingress)
 apiVersion: v1
 kind: Service
 metadata:
@@ -8,12 +8,11 @@ metadata:
   labels:
     app: service-dashboard
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
   - name: http
     port: 3000
     targetPort: http
-    nodePort: 8090
     protocol: TCP
   selector:
     app: service-dashboard

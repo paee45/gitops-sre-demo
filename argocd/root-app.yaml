@@ -15,6 +15,9 @@ spec:
     targetRevision: HEAD
     # ArgoCD watches this directory for child Application manifests
     path: k8s
+    directory:
+      recurse: true   # descend into kong/, apps/, observability/, argocd/ subdirs
+      include: "**/app.yaml"  # only pick up child Application manifests in subdirs
 
   destination:
     server: https://kubernetes.default.svc

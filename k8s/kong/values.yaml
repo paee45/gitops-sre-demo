@@ -7,7 +7,7 @@
 # ---------------------------------------------------------------------------
 ingressController:
   enabled: true
-  installCRDs: true          # Install all CRDs via helm (ArgoCD ServerSideApply manages them)
+  installCRDs: false         # CRDs managed via k8s/kong-crds/ (GitOps, sync-wave 0)
   ingressClass: kong
   image:
     repository: kong/kubernetes-ingress-controller

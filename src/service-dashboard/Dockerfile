@@ -16,15 +16,18 @@ WORKDIR /app
 RUN apk add --no-cache dumb-init
 
 # Copy backend files
-COPY package*.json ./
+COPY --chown=node:node package*.json ./
 RUN npm ci --omit=dev
 
 # Copy built React frontend from builder stage
-COPY --from=builder /app/client/dist ./client/dist
+COPY --chown=node:node --from=builder /app/client/dist ./client/dist
 
 # Copy other necessary files
-COPY server.js .
-COPY .env.example .
+COPY --chown=node:node server.js .
+COPY --chown=node:node .env.example .
+
+# Run as non-root user (node UID=1000)
+USER 1000
 
 # Expose port
 EXPOSE 3000

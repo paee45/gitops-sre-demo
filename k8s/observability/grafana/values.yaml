@@ -3,6 +3,10 @@
 
 replicas: 1
 
+# Admin credentials (chart handles this via GF_SECURITY_ADMIN_PASSWORD env var)
+adminUser: admin
+adminPassword: demo123   # Change for a real deployment
+
 resources:
   requests:
     cpu: 50m
@@ -11,10 +15,9 @@ resources:
     cpu: 250m
     memory: 256Mi
 
-# Expose via NodePort 3000 (opened in SG)
+# Expose via ClusterIP (access via kubectl port-forward for local dev)
 service:
-  type: NodePort
-  nodePort: 3000
+  type: ClusterIP
   port: 80
   targetPort: 3000
 
@@ -29,7 +32,6 @@ grafana.ini:
     root_url: "%(protocol)s://%(domain)s:%(http_port)s/"
   security:
     admin_user: admin
-    admin_password: demo123       # Change for a real deployment
     allow_embedding: true
   users:
     allow_sign_up: false

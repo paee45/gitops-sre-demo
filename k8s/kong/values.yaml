@@ -39,16 +39,15 @@ env:
   status_listen: "0.0.0.0:8100"
 
 # ---------------------------------------------------------------------------
-# Proxy — NodePort 8000 (range extended in K3s via --service-node-port-range)
+# Proxy — LoadBalancer (k3d maps 8000:8000@loadbalancer → klipper-lb:8000)
 # ---------------------------------------------------------------------------
 proxy:
   enabled: true
-  type: NodePort
+  type: LoadBalancer
   http:
     enabled: true
-    servicePort: 80
+    servicePort: 8000
     containerPort: 8000
-    nodePort: 8000
   tls:
     enabled: false             # HTTP only for demo
 

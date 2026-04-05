@@ -29,8 +29,7 @@ mimir:
       tsdb:
         dir: /data/tsdb
 
-    store_gateway:
-      sharding_enabled: false
+    store_gateway: {}
 
     ingester:
       ring:

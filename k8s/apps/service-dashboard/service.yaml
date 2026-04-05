@@ -1,0 +1,19 @@
+---
+# Service Dashboard Service (NodePort)
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-dashboard
+  namespace: apps
+  labels:
+    app: service-dashboard
+spec:
+  type: NodePort
+  ports:
+  - name: http
+    port: 3000
+    targetPort: http
+    nodePort: 8090
+    protocol: TCP
+  selector:
+    app: service-dashboard

@@ -1,6 +1,28 @@
-# GitOps-Driven SRE Demo
+# Production-Grade GitOps SRE Platform (ArgoCD + Codefresh + LGTM)
 
-A production-representative SRE demo on a **single AWS EC2 instance** (Debian 12, t3.medium).  
+> **For recruiters and hiring managers** — see the [Showcase](#showcase) section below for a live demo link, a walkthrough script, and a quick summary of the engineering decisions made in this project.
+
+## 🚀 TL;DR
+
+- GitOps platform using ArgoCD (App of Apps)
+- CI/CD split: GitHub Actions (build) → Codefresh (promotion)
+- Secure AWS setup with OIDC — no static credentials
+- Full observability (metrics, logs, traces) via LGTM stack
+- Deployment validation using SLOs (error rate, latency, and pod restarts)
+
+> 👉 Production-grade SRE platform running on a single EC2 (~$33/month)
+>
+> Demonstrates how to build a safe, observable, and production-ready delivery platform from scratch.
+
+## Who this project is for
+
+- SRE / Platform Engineer roles
+- DevOps / Cloud Infrastructure positions
+- Teams adopting GitOps and observability-driven delivery
+
+---
+
+A production-grade GitOps SRE platform running on a **single AWS EC2 instance** (Debian 12, t3.medium), designed to demonstrate real-world delivery, observability, and security practices.  
 Infrastructure is managed by Terraform, application state is managed by ArgoCD (App of Apps), and observability is the full **LGTM stack** (Loki · Grafana · Tempo · Mimir) collected by Grafana Alloy.
 
 ```
@@ -9,7 +31,8 @@ GitHub Push
     ├─ .github/workflows/pipeline.yml ──► plan (read-only, any branch)
     │                                 └── apply (main only, approval gate) ──► EC2 (t3.medium)
     │                                                                                │
-    └─ .github/workflows/build-images.yml ─► GHCR images                           │
+    └─ .github/workflows/build-images.yml ─► GHCR (container registry) ─► trigger Codefresh promotion pipeline
+                                                                                     │
                                                                                      ▼
                               ArgoCD (App of Apps) ◄── git pull ─────────────────── K3s
                                    │
@@ -36,7 +59,8 @@ GitHub Push
 | Collector | Grafana Alloy | DaemonSet, River config |
 | Services | service-a (HTTP) | orders API, Prometheus + OTLP |
 | Services | service-b (worker) | background jobs, Prometheus + OTLP |
-| CI | GitHub Actions | OIDC → AWS (plan + apply roles), GHCR images |
+| CI | GitHub Actions | OIDC → AWS (plan + apply roles), GHCR (container registry), triggers Codefresh promotion pipeline |
+| CD promotion | Codefresh | `codefresh.yml` — dev → staging → production with approval gates |
 | IaC | Terraform | S3+DynamoDB backend, OIDC provider, permission boundaries |
 
 ---
@@ -313,7 +337,17 @@ github_org              = "paee45"
 github_repo             = "gitops-sre-demo"
 tf_state_bucket         = "paee45-gitops-sre-tf-state"
 tf_state_dynamodb_table = "terraform-state-lock"
+
+# Optional — GitHub PAT with read:packages scope.
+# Terraform uses this to create an imagePullSecret on the K3s node so it can
+# pull private GHCR images. Leave blank and make packages public instead (see note below).
+# ghcr_token = "ghp_your_token_here"
 ```
+
+> **GHCR image visibility:** After the first CI push (`src/` change on `main`), your container
+> images land in GitHub Packages as **private** by default. Either set `ghcr_token` above, or
+> make both packages public: GitHub → your profile → Packages → select `service-a` (then
+> `service-b`) → Package Settings → Change visibility → Public.
 
 > **What all bootstrap paths create:**
 > - **S3 bucket** — versioning, SSE-AES256, public access block, **Object Lock (GOVERNANCE, 30-day retention)**. Object Lock must be set at creation time — it cannot be added to an existing bucket. GOVERNANCE mode protects state file versions from deletion for 30 days after upload.
@@ -401,6 +435,8 @@ terraform -chdir=terraform output
 | `instance_public_ip` | EC2 public IP address |
 | `grafana_url` | `http://<public-ip>:3000` |
 | `argocd_url` | `http://<public-ip>:32080` |
+| `kong_url` | `http://<public-ip>:8000` — Kong API Gateway proxy |
+| `dashboard_url` | `http://<public-ip>:8090` — Service Dashboard (status & tests) |
 | `ssh_key_secret_arn` | Secrets Manager ARN for the SSH private key |
 | `ssh_command` | One-liner: fetches key from SM then SSHs |
 | `iam_role_arn` | GitHub Actions apply role ARN |
@@ -450,6 +486,8 @@ ssh admin@<ip> 'kubectl -n argocd get secret argocd-initial-admin-secret \
 | Go RED Metrics | 10127 | Rate, Errors, Duration for Go services |
 | ArgoCD | 14584 | Sync status, app health |
 | Tempo / Distributed Tracing | 19689 | Trace search + latency heatmap |
+| **Deployment Health** (custom) | — | Deploy frequency · SLO gauges · Error rate · Latency P95 · Pod restarts |
+| **Kong — Traffic & Protection** (custom) | — | RPS · 401/429/5xx rates · upstream latency P95 · SLO gauges vs service-a |
 
 Trace-to-logs and trace-to-metrics correlation is configured. Click a trace span in Tempo to jump directly to the correlated Loki log stream.
 
@@ -492,7 +530,9 @@ Alloy also scrapes kubelet cAdvisor on every node and forwards to Mimir.
 | Grafana | ~128 MB | ~256 MB |
 | Alloy | ~128 MB | ~256 MB |
 | service-a + service-b | ~64 MB | ~128 MB |
-| **Total requests** | **~1.95 GB** | **~2.8 GB** |
+| Kong (proxy + KIC) | ~256 MB | ~512 MB |
+| Service Dashboard (Node.js + React) | ~128 MB | ~256 MB |
+| **Total requests** | **~2.3 GB** | **~3.6 GB** |
 
 A 3 GB swapfile (`vm.swappiness=30`) provides headroom during cold starts. If you hit OOM during a live demo, upgrade with:
 
@@ -523,6 +563,7 @@ Destroy when done: `terraform destroy`.
 
 ```
 .
+├── codefresh.yml                 # Codefresh CD — promotion pipeline (dev → staging → production)
 ├── .github/
 │   └── workflows/
 │       ├── bootstrap.yml         # One-shot: deploys CFN stack to create S3+DynamoDB backend
@@ -531,24 +572,56 @@ Destroy when done: `terraform destroy`.
 ├── argocd/
 │   └── root-app.yaml             # App of Apps root application
 ├── k8s/
+│   ├── argocd/                   # ArgoCD self-management (sync-wave: -1)
+│   │   ├── argocd-app.yaml       #   ArgoCD Application — manages ArgoCD itself via Helm
+│   │   └── values.yaml           #   ArgoCD Helm values (shared by Terraform + self-mgmt)
 │   ├── observability/
 │   │   ├── loki/                 # Loki app.yaml + values.yaml
 │   │   ├── mimir/                # Mimir app.yaml + values.yaml
 │   │   ├── tempo/                # Tempo app.yaml + values.yaml
 │   │   ├── grafana/              # Grafana app.yaml + values.yaml
+│   │   │   └── dashboards/
+│   │   │       └── deployment-health-configmap.yaml  # Custom SRE dashboard (auto-loaded)
 │   │   └── alloy/                # Alloy app.yaml + values.yaml + config.alloy
+│   ├── kong/                     # Kong API Gateway (DB-less mode)
+│   │   ├── app.yaml              #   ArgoCD Application — sync-wave: 1
+│   │   ├── values.yaml           #   NodePort 8000, status 8100, Alloy annotations
+│   │   ├── plugins.yaml          #   KongClusterPlugin (prometheus) + rate-limit + jwt
+│   │   ├── consumer.yaml         #   KongConsumer demo-client + JWT credential secret
+│   │   └── ingress.yaml          #   Ingress /api/orders → service-a, jwt+rate-limit
 │   └── apps/
 │       ├── service-a/            # ArgoCD app + K8s manifests
 │       └── service-b/            # ArgoCD app + K8s manifests
+├── demo/
+│   └── load-generator/           # One-shot K8s Jobs for Kong demo (NOT managed by ArgoCD)
+│       ├── phase1-direct-attack.yaml   # Flood service-a directly — no protection
+│       ├── phase2-kong-unauth.yaml     # Hit Kong without JWT — expect 401s
+│       └── phase3-kong-ratelimited.yaml # Burst with JWT — expect 429 after 60/min
 ├── src/
 │   ├── service-a/                # Go HTTP API simulator
 │   │   ├── main.go
 │   │   ├── go.mod
 │   │   └── Dockerfile
-│   └── service-b/                # Go background worker simulator
-│       ├── main.go
-│       ├── go.mod
-│       └── Dockerfile
+│   ├── service-b/                # Go background worker simulator
+│   │   ├── main.go
+│   │   ├── go.mod
+│   │   └── Dockerfile
+│   └── service-dashboard/        # React + Node.js status dashboard
+│       ├── server.js             #   Express backend (Kubernetes API client)
+│       ├── package.json
+│       ├── Dockerfile           #   Multi-stage: build React, serve with Node.js
+│       ├── .env.example
+│       └── client/              #   React frontend (Vite)
+│           ├── src/
+│           │   ├── App.jsx
+│           │   ├── main.jsx
+│           │   ├── index.css
+│           │   └── components/
+│           │       ├── StatusPanel.jsx
+│           │       └── NavBar.jsx
+│           ├── index.html
+│           ├── package.json
+│           └── vite.config.js
 └── terraform/
     ├── bootstrap/                # Run ONCE: creates S3 bucket + DynamoDB table (local state)
     │   ├── main.tf               #   account guard, S3, DynamoDB, scoped bootstrap IAM policy
@@ -575,3 +648,462 @@ Destroy when done: `terraform destroy`.
 - The root App of Apps is applied with `kubectl apply`
 
 Re-running `terraform apply` with `user_data_replace_on_change = true` will replace the instance only if the user-data template changes. Instance type changes also trigger replacement.
+
+---
+
+## CI/CD Split — GitHub Actions + Codefresh
+
+This project uses a deliberate **CI/CD separation**:
+
+| Concern | Tool | File |
+|---|---|---|
+| **CI** — build image, push to GHCR, trigger CD | GitHub Actions | `.github/workflows/build-images.yml` |
+| **CD** — promotion flow, approval gates, env tracking | Codefresh | `codefresh.yml` |
+
+```
+GitHub Push (main)
+    │
+    └─ GitHub Actions (CI) ──────────────────────────────────────────────────┐
+         ├─ docker build + push → ghcr.io/paee45/service-{a,b}:<sha>        │
+         └─ trigger-cd job: POST Codefresh API (IMAGE_TAG=<sha>) ───────────┘
+                                     │
+                          Codefresh (CD Promotion UI)
+                               │
+                    ┌──────────┼──────────────────┐
+                    ▼          ▼                  ▼
+                  dev       staging           production
+               (auto)    (approval gate)   (approval gate
+                                           + git release tag)
+                    │          │                  │
+              commit k8s/  commit k8s/       commit k8s/apps/*/
+              envs/dev.env envs/staging.env  deployment.yaml +
+                                             envs/production.env
+                    │          │                  │
+                    └──────────┴──────────────────┘
+                                     │
+                            ArgoCD auto-sync (<3 min)
+```
+
+Codefresh acts as a **release orchestration layer**, enabling controlled promotion across environments while ArgoCD performs the actual deployment. Promotion is implemented as a **Git change (GitOps), not a rebuild**, ensuring immutability and consistency across environments.
+
+### Codefresh promotion stages
+
+| Stage | Approval | What it commits | Timeout |
+|---|---|---|---|
+| `dev` | Auto | `k8s/envs/dev.env` | — |
+| `staging` | Manual (Codefresh UI) | `k8s/envs/staging.env` | 48 h |
+| `production` | Manual + diff preview | `k8s/apps/*/deployment.yaml` + `k8s/envs/production.env` + `release-<sha>` git tag | 72 h |
+
+The `k8s/envs/*.env` files are environment pins — they record exactly what image is running where and who approved it. ArgoCD watches `k8s/apps/*/deployment.yaml` (updated on production promote); the `.env` files serve as the audit trail.
+
+### One-time Codefresh setup
+
+1. **Pipeline variable** — Pipelines → `codefresh.yml` → Variables
+   - `GITHUB_TOKEN` (secret) — PAT with `repo` scope, used for git push + release tag
+
+2. **Trigger** from GitHub Actions — already implemented as the `trigger-cd` job in `.github/workflows/build-images.yml`:
+   - Runs after both matrix builds complete (`needs: [build]`)
+   - Only fires on `main` branch pushes
+   - Sends `IMAGE_TAG=<7-char sha>` to the Codefresh API
+   - Fails the workflow if Codefresh returns a non-2xx response
+
+   GitHub secret required: `CODEFRESH_API_TOKEN` (Codefresh → User Settings → API Keys)
+
+3. **Or run manually** — Codefresh UI → Run Pipeline → set `IMAGE_TAG=<sha>`
+
+---
+
+## ArgoCD Bootstrap Architecture
+
+ArgoCD is bootstrapped in two phases — **Terraform once, ArgoCD forever**:
+
+### Phase 1 — Initial install (Terraform, runs once)
+
+`terraform/user-data.sh` runs on first EC2 boot and:
+
+1. Installs K3s
+2. Installs ArgoCD via `helm upgrade --install --atomic` using `k8s/argocd/values.yaml`
+3. Applies `argocd/root-app.yaml` — the App of Apps root
+
+### Phase 2 — Self-management (ArgoCD, ongoing)
+
+Once the root app is synced, ArgoCD discovers `k8s/argocd/argocd-app.yaml`:
+
+```yaml
+# k8s/argocd/argocd-app.yaml
+# sync-wave: -1 → runs before all other apps
+sources:
+  - chart: argo-cd                            # official Helm chart
+    targetRevision: "9.4.17"
+    valueFiles: [$values/k8s/argocd/values.yaml]
+  - repoURL: ...gitops-sre-demo.git           # values source
+    ref: values
+```
+
+From this point, **any change to `k8s/argocd/values.yaml` is automatically applied by ArgoCD**. No manual `helm upgrade` needed.
+
+```
+                  ┌─────────────────────────────────────────┐
+  Git push  ──►  │  root-app  (path: k8s)                  │
+                  │    │                                     │
+                  │    ├─► argocd-app   (sync-wave: -1)     │
+                  │    ├─► grafana-app  (lgtm ns)           │
+                  │    ├─► loki-app                         │
+                  │    ├─► mimir-app                        │
+                  │    ├─► tempo-app                        │
+                  │    ├─► alloy-app                        │
+                  │    ├─► service-a-app (apps ns)          │
+                  │    └─► service-b-app                    │
+                  └─────────────────────────────────────────┘
+```
+
+The `sync-wave: -1` annotation on `argocd-app` ensures ArgoCD finishes reconciling its own config before syncing any child applications.
+
+---
+
+## Deployment Health Dashboard
+
+A custom Grafana dashboard (`k8s/observability/grafana/dashboards/deployment-health-configmap.yaml`) is provisioned automatically via the Grafana sidecar — no Grafana restart needed.
+
+The Grafana sidecar watches all namespaces for ConfigMaps labelled `grafana_dashboard: "1"`. The dashboard appears under **Dashboards → Browse → SRE Demo** within ~30 seconds of ArgoCD syncing.
+
+### ⭐ Deployment validation (SRE focus)
+
+Unlike typical demos that stop at "deployment succeeded", this project validates every release using:
+
+- Error rate (5xx)
+- Latency (P95)
+- Pod restart spikes
+- SLO compliance
+
+A deployment is only considered successful if these remain within SLO.
+
+### Dashboard layout
+
+| Row | Panels | What it answers |
+|---|---|---|
+| 🚀 Deployment Overview | Deploy Frequency · Sync Success % · Sync Failures · Apps Healthy | "How often do we deploy, and is it working?" |
+| (full-width) | Sync Events Over Time (bar, Succeeded vs Failed) | Deploy cadence history with annotation markers |
+| ⚡ Deployment Performance | Reconcile Duration avg · Sync Duration P95 | "How long does a deployment take?" |
+| 🔥 Post-Deploy Impact | HTTP Error Rate 5xx · Latency P95 | "Did the deployment break anything?" |
+| 🔄 Kubernetes Stability | Pod Restarts · Running Pods per namespace | "Is the cluster stable after deploy?" |
+| 🎯 SLO Compliance | SLO gauge: Error rate < 1% · SLO gauge: P95 < 300 ms | "Are we meeting our SLOs?" |
+
+### Key PromQL queries
+
+```promql
+# Deployment frequency (last hour)
+sum(increase(argocd_app_sync_total[1h]))
+
+# Sync success rate
+100 * sum(increase(argocd_app_sync_total{phase="Succeeded"}[1h]))
+    / clamp_min(sum(increase(argocd_app_sync_total[1h])), 1)
+
+# Reconcile duration (avg per app)
+sum by (app) (rate(argocd_app_reconcile_duration_seconds_sum[5m]))
+  / sum by (app) (rate(argocd_app_reconcile_duration_seconds_count[5m]))
+
+# HTTP 5xx error rate
+sum(rate(http_requests_total{status=~"5.."}[5m])) by (service_name)
+
+# Latency P95
+histogram_quantile(0.95,
+  sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service_name))
+
+# Pod restarts
+sum by (pod, namespace) (
+  increase(kube_pod_container_status_restarts_total{namespace=~"$namespace"}[5m]))
+```
+
+### Dashboard variables
+
+| Variable | Query | Use |
+|---|---|---|
+| `$app` | `label_values(argocd_app_info, name)` | Filter all panels to one ArgoCD app |
+| `$namespace` | `label_values(kube_pod_info, namespace)` | Filter pod/restart panels |
+
+### Simulating a failure (demo script)
+
+```bash
+# 1. SSH into the node
+terraform -chdir=terraform output -raw ssh_command | bash
+
+# 2. Trigger pod restarts on service-a
+kubectl -n apps rollout restart deployment/service-a
+
+# 3. Watch in Grafana → Deployment Health Dashboard
+#    - Pod Restarts panel spikes immediately
+#    - ArgoCD self-heals (selfHeal:true) → Sync Events shows a Succeeded bar
+#    - Error Rate + Latency may spike briefly during rollout
+```
+
+---
+
+## Kong API Gateway — Traffic Control Layer
+
+Kong runs as a DB-less Kubernetes Ingress Controller (KIC), deployed via ArgoCD at sync-wave 1. All Kong configuration is stored as Kubernetes CRDs — no database, no out-of-band changes.
+
+### Architecture
+
+```
+  External / load-generator
+          │
+          ▼
+   [ EC2:8000 (NodePort) ]
+          │
+          ▼
+  Kong Proxy (kong ns)
+    ├─ jwt-orders plugin     → 401 Unauthorized (no/invalid JWT)
+    ├─ rate-limit-orders     → 429 Too Many Requests (> 60 req/min)
+    └─ prometheus-global     → metrics at :8100/metrics (scraped by Alloy)
+          │
+    (passes through)
+          ▼
+  service-a (apps ns) :8080/api/orders
+    ├─ OTEL traces → Tempo
+    ├─ /metrics    → Mimir (via Alloy)
+    └─ stdout logs → Loki (via Alloy)
+```
+
+### Configuration (all GitOps, applied by ArgoCD)
+
+| File | What it does |
+|---|---|
+| `k8s/kong/app.yaml` | ArgoCD Application — installs `kong/kong:2.38.0` into `kong` ns (sync-wave 1) |
+| `k8s/kong/values.yaml` | DB-less mode, NodePort 8000, status endpoint 0.0.0.0:8100 for Alloy scraping |
+| `k8s/kong/plugins.yaml` | `KongClusterPlugin` prometheus · `KongPlugin` rate-limit (60/min) · `KongPlugin` jwt |
+| `k8s/kong/consumer.yaml` | `KongConsumer` demo-client with HS256 JWT credential |
+| `k8s/kong/ingress.yaml` | Ingress `ingressClassName: kong` — routes `/api/orders` → service-a:8080 |
+
+### 3-Phase Demo
+
+> **SRE insight:** `429` = system is protecting itself. `5xx` = system is failing. They look the same on a latency graph but mean opposite things.
+
+#### Phase 1 — No Gateway (baseline failure)
+
+```bash
+# Direct attack: 500 concurrent requests hit service-a with no protection
+kubectl apply -f demo/load-generator/phase1-direct-attack.yaml
+
+# Expect: error rate spikes in Grafana → Deployment Health Dashboard
+# service-a's 4% synthetic error rate compounds under load
+```
+
+#### Phase 2 — Kong blocks unauthenticated traffic
+
+```bash
+# Same flood, but through Kong without a JWT
+kubectl apply -f demo/load-generator/phase2-kong-unauth.yaml
+
+# Expect: 100% 401 responses — service-a receives ZERO requests
+# Check: kubectl logs -l job-name=load-phase2-kong-unauth -n tools
+```
+
+#### Phase 3 — Rate limiting preserves SLOs
+
+```bash
+# 0. Verify services are healthy before running the demo
+kubectl wait --for=condition=ready pod -l app=service-a -n apps --timeout=60s
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=kong -n kong --timeout=60s
+
+# 1. Generate a JWT for the demo consumer
+python3 -c "
+import base64, hmac, hashlib, json, time
+header = base64.urlsafe_b64encode(json.dumps({'alg':'HS256','typ':'JWT'}).encode()).rstrip(b'=').decode()
+payload = base64.urlsafe_b64encode(json.dumps({'iss':'demo-client','exp':int(time.time())+3600}).encode()).rstrip(b'=').decode()
+msg = f'{header}.{payload}'
+sig = base64.urlsafe_b64encode(hmac.new(b'gitops-sre-demo-jwt-secret-changeme', msg.encode(), hashlib.sha256).digest()).rstrip(b'=').decode()
+print(f'{msg}.{sig}')
+"
+
+# 2. Store the token and fire burst load
+kubectl create secret generic demo-jwt -n tools --from-literal=token="<PASTE_TOKEN>"
+kubectl apply -f demo/load-generator/phase3-kong-ratelimited.yaml
+
+# Expect: first 60 req/min pass (200), remainder get 429
+# Open Grafana → Kong Traffic & Protection dashboard:
+#   - 429 rate spikes (orange) = protection is active
+#   - 5xx rate stays flat (green) = SLO preserved
+#   - service-a P95 latency stays stable
+```
+
+### FAQ
+
+**Q: Are service-a and service-b custom apps or open-source?**  
+Custom Go apps. `service-a` is an HTTP API with a synthetic load generator, 4% error rate, 10–800 ms latency jitter, OTEL tracing, and Prometheus metrics — purpose-built as a realistic demo target. `service-b` is a background worker with no HTTP API (not proxied by Kong). No external tool needed to generate traffic; `service-a` creates it internally.
+
+**Q: Does the demo need an external caller to hit the API?**  
+No. `service-a` has a built-in load generator (1–5 requests every 2 seconds). The `demo/load-generator/` Jobs provide controlled burst scenarios for the 3-phase demo.
+
+**Q: For dev/staging/production promotion, do we use separate namespaces?**  
+The current setup uses a single cluster with `apps` namespace. The production-ready pattern is: `apps-dev` / `apps-staging` / `apps-production` namespaces with Kustomize overlays per environment. This is listed in Future Improvements — implementing it requires a Kustomize refactor of `k8s/apps/` but does not change the GitOps/ArgoCD plumbing.
+
+---
+
+## Service Dashboard — Status & Monitoring UI
+
+A **React + Node.js web app** that provides real-time visibility into platform components and quick access to key resources.
+
+### Features
+
+| Feature | Description |
+|---|---|
+| **📊 Status Tab** | Real-time health check of Kong, service-a/b, Grafana, Loki, Mimir, Tempo, Alloy, and ArgoCD with color-coded cards |
+| **🔐 JWT Generator Tab** | One-click JWT token generation for Kong demo (HS256, 1-hour expiry) — copy/paste into Phase 3 load test |
+| **🔗 Endpoints Tab** | Quick links to Kong (proxy/admin/metrics), services, Grafana, ArgoCD — plus copy/paste kubectl debugging commands |
+| **⚡ Load Tests Tab** | 3-phase demo orchestration UI with step-by-step instructions and links to Grafana dashboards |
+| **Token Auth** | Bearer token authentication (configurable via `dashboard-secret`) |
+| **Auto-refresh** | Status updates every 10 seconds during live monitoring |
+
+### Accessing the Dashboard
+
+```bash
+# URL
+http://<public-ip>:8090
+
+# Default token (change in production)
+gitops-sre-demo-token-changeme
+```
+
+### Deployment
+
+Deployed via ArgoCD at `k8s/apps/service-dashboard/`:
+- **Image:** `ghcr.io/paee45/service-dashboard:latest` (built from `src/service-dashboard/`)
+- **Port:** 8090 (NodePort)
+- **Replicas:** 1
+- **Auth:** RBAC ClusterRole for reading pod/deployment status across all namespaces
+- **Token:** Stored in `dashboard-secret` in the `apps` namespace
+- **Frontend:** React app (Vite) compiled into `client/dist/`, served by Express backend
+
+### Building Locally
+
+```bash
+cd src/service-dashboard
+
+# Install dependencies (both backend + frontend)
+npm install
+cd client && npm install && cd ..
+
+# Development (with live reload)
+npm run dev            # Backend on :3000 + frontend proxy
+
+# Production build
+npm run build          # Builds React, creates dist/
+npm run build:all      # Build + start Node.js server on :3000
+
+# Docker build (multi-stage: React → Node.js)
+docker build -t service-dashboard:latest .
+docker run -p 3000:3000 service-dashboard:latest
+```
+
+### API Endpoints
+
+| Endpoint | Method | Auth | What it returns | Use case |
+|---|---|---|---|---|
+| `/api/health` | GET | None | `{ status: "ok" }` | Liveness/readiness probe |
+| `/api/status` | GET | Token | Cluster component status (kong, services, observability stack) | Status tab: real-time pod/deployment health |
+| `/api/endpoints` | GET | Token | Kong proxy/admin/metrics URLs, direct nodeIP discovery | Endpoints tab: automatic URL generation |
+| `/api/jwt-generate` | POST | Token | `{ token: "...", expiresIn: 3600 }` | JWT Generator tab: on-demand token creation |
+| `/api/deploy-load-test/:phase` | POST | Token | `{ command: "kubectl apply -f demo/load-generator/..." }` | Load Tests tab: phase deployment instructions |
+| `/api/pods/:namespace` | GET | Token | Pod list with status/restarts/ready | Debugging: per-namespace pod visibility |
+| `/api/kong-metrics` | GET | Token | Kong NodePort and metrics endpoint | Dashboard: Kong connectivity check |
+
+---
+
+## Design Tradeoffs
+
+| Decision | Choice | Tradeoff |
+|---|---|---|
+| **Single EC2 vs EKS** | Single EC2 (~$33/mo) | Cost and simplicity; architecture is EKS-ready without code changes |
+| **K3s vs full Kubernetes** | K3s | Faster bootstrap, lighter footprint; full Kubernetes API compatibility maintained |
+| **Monolithic LGTM stack** | Single-binary Loki/Mimir/Tempo | Reduced operational overhead; tradeoff: limited horizontal scalability |
+| **NodePort exposure** | NodePort 32080 (ArgoCD), 3000 (Grafana), 8000 (Kong) | Simpler than ALB/Ingress for demo; not production-grade networking |
+| **Kong DB-less mode** | All config via K8s CRDs, no Postgres | Pure GitOps; tradeoff: no Kong Manager UI, no runtime config changes |
+| **CI/CD split** | GitHub Actions (CI) + Codefresh (CD) | Clear separation of concerns; CI tooling is swappable without touching promotion logic |
+
+---
+
+## Future Improvements
+
+- **Progressive delivery** — canary / blue-green rollouts using Argo Rollouts
+- **Multi-cluster / multi-region** — separate clusters per environment with ArgoCD ApplicationSets
+- **Namespace-per-environment** — `apps-dev` / `apps-staging` / `apps-production` with Kustomize overlays for true environment isolation
+- **External secret management** — integration with HashiCorp Vault or AWS Secrets Manager via External Secrets Operator
+- **JWT secret rotation** — replace demo HS256 static secret with external secret management and automated rotation
+
+---
+
+## Showcase
+
+> For hiring managers and technical reviewers
+
+### ⭐ Key idea
+
+A deployment is only considered successful if:
+- it is **synced** (ArgoCD)
+- AND system behavior remains **healthy** (Grafana SLOs)
+
+This demo focuses on **safe and observable delivery**, not just deployment automation.
+
+> This project focuses on **safe delivery, not just fast delivery**.
+
+### Live demo
+
+| | |
+|---|---|
+| **Grafana** | `http://<PUBLIC_IP>:3000` (anonymous viewer, no login) |
+| **ArgoCD** | `http://<PUBLIC_IP>:32080` (admin / see SSH retrieval above) |
+| **Kong Proxy** | `http://<PUBLIC_IP>:8000` (JWT required for /api/orders) |
+| **Service Dashboard** | `http://<PUBLIC_IP>:8090` (token: `gitops-sre-demo-token-changeme`) |
+| **Public IP** | Set after `terraform apply` — run `terraform -chdir=terraform output instance_public_ip` |
+
+> **Note:** The EC2 instance is stopped when not actively demoing to reduce cost (~$33/mo running).  
+> Email or message me to request a live session — I'll start it up in < 5 minutes.
+
+### What this demonstrates
+
+| Capability | How it's shown | Why it matters |
+|---|---|---|
+| **GitOps delivery** | Push to `main` → ArgoCD sync in < 3 min | Zero-touch deploy, full audit trail in Git |
+| **IaC safety** | OIDC (no static keys), permission boundaries, account guard | AWS security best practices |
+| **Observability** | LGTM stack auto-provisioned, correlated logs/metrics/traces | Production-grade o11y from day 1 |
+| **Deployment health** | Custom Grafana dashboard with SLO gauges | Validates every deploy, not just "Synced" |
+| **Self-healing** | ArgoCD `selfHeal: true` — manual drift auto-corrected | Demonstrates GitOps reconciliation |
+| **CI/CD separation** | GitHub Actions (build+push) → Codefresh (promote) — decoupled by image tag | CI-agnostic GitOps; swap CI without touching promotion logic |
+| **ArgoCD self-mgmt** | ArgoCD manages its own Helm config via app-of-apps | No config drift after initial bootstrap |
+| **API Gateway (Kong)** | DB-less KIC with JWT auth + rate limiting — 3-phase live demo | Traffic shaping: 429 = protection, 5xx = failure. SLO preserved under attack |
+| **Platform Dashboard** | React UI showing real-time component health + quick links | Operator-friendly monitoring, no Kubernetes CLI needed |
+| **Cost-aware** | Everything runs on a single t3.medium with resource limits | Shows awareness of real-world constraints |
+
+### Demo walkthrough script (5 minutes)
+
+```
+1. Open ArgoCD UI → show all apps Synced + Healthy (App of Apps tree)
+
+2. Trigger a deploy:
+   git commit --allow-empty -m "demo: trigger sync"
+   git push origin main
+   → GitHub Actions builds + pushes image (or Codefresh in parallel)
+
+3. Open Grafana → Deployment Health Dashboard
+   → "Deploy Frequency" stat increments
+   → "Sync Events Over Time" shows a green bar
+   → Walk through Error Rate and Latency panels
+   → Point to SLO gauges: "A deploy isn't complete until these are green"
+
+4. Simulate failure:
+   kubectl -n apps rollout restart deployment/service-a
+   → Pod Restarts panel spikes
+   → ArgoCD self-heals → another green sync bar appears
+
+5. Show ArgoCD manages itself:
+   "If I change k8s/argocd/values.yaml and push, ArgoCD updates its own config
+    with no manual helm upgrade — true GitOps for the GitOps controller itself."
+```
+
+### Engineering decisions worth discussing
+
+- **Why no static credentials anywhere?** OIDC + permission boundaries means a leaked token can't do anything useful outside this project's resources.
+- **Why Codefresh + GitHub Actions?** Shows CI-agnosticism — the GitOps promotion pattern works the same regardless of CI platform. The image tag update + ArgoCD sync decouples CI from CD.
+- **Why a single EC2 instead of EKS?** Cost-conscious demo: full production observability stack for ~$33/mo. The k3s → EKS migration path is straightforward (update kubeconfig, add node groups, nothing else changes).
+- **Why LGTM vs Prometheus/Grafana only?** Logs, metrics, and traces in one unified stack enables trace-to-logs and trace-to-metrics correlation — one click from a slow trace to the exact log line and the metric that degraded.

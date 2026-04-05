@@ -1,0 +1,108 @@
+# ---------------------------------------------------------------------------
+# Phase 3 Demo — Authenticated burst attack (rate limiting in action)
+#
+# Usage (generate JWT first — see README "Generate demo JWT" section):
+#   export DEMO_TOKEN="eyJ..."  (from README jwt generation command)
+#   kubectl create secret generic demo-jwt -n tools --from-literal=token="$DEMO_TOKEN"
+#   kubectl apply -f demo/load-generator/phase3-kong-ratelimited.yaml
+#   kubectl logs -n tools job/phase3-kong-ratelimited -f
+#   kubectl delete -f demo/load-generator/phase3-kong-ratelimited.yaml
+#
+# Watch in Grafana → Kong Traffic & Protection Dashboard:
+#   - 200 OK responses for first 60 requests/minute
+#   - 429 Rate Limited for excess requests (Kong protection, NOT backend failure)
+#   - service-a error rate: STABLE (backend never overloaded)
+#   - Latency P95: FLAT
+#   - SLO gauge: GREEN
+#
+# Key insight for the demo:
+#   "We don't eliminate traffic — we shape it.
+#    5xx = system failure. 429 = system protection."
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tools
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase3-kong-ratelimited
+  namespace: tools
+  labels:
+    demo-phase: "3"
+    demo: kong-traffic
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        demo-phase: "3"
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: jwt-token
+          secret:
+            secretName: demo-jwt
+      containers:
+        - name: attacker
+          image: curlimages/curl:latest
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: jwt-token
+              mountPath: /var/secret
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              TOKEN=$(cat /var/secret/token)
+              echo "=== Phase 3: Authenticated burst attack through Kong ==="
+              echo "Target: http://kong-kong-proxy.kong.svc.cluster.local:80/api/orders"
+              echo "Authorization: Bearer ${TOKEN:0:20}..."
+              echo "Rate limit: 60 req/min (expect 429 on excess)"
+              echo ""
+
+              TARGET="http://kong-kong-proxy.kong.svc.cluster.local:80/api/orders"
+              OK=0
+              RATE_LIMITED=0
+              ERRORS=0
+
+              # Fire 200 requests rapidly — only first 60/min will be 200, rest 429
+              # Capture headers on first few requests to show RateLimit-* values
+              for i in $(seq 1 200); do
+                if [ $i -le 3 ] || [ $i -eq 61 ]; then
+                  # Verbose output for demo visibility (shows RateLimit-Remaining header)
+                  RESPONSE=$(curl -i -s -H "Authorization: Bearer $TOKEN" "$TARGET")
+                  CODE=$(echo "$RESPONSE" | grep -i "^HTTP" | awk '{print $2}')
+                  REMAINING=$(echo "$RESPONSE" | grep -i "^RateLimit-Remaining" | awk '{print $2}' | tr -d '\r')
+                  [ -n "$REMAINING" ] && echo "[req $i] $CODE (RateLimit-Remaining: $REMAINING)"
+                else
+                  CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                    -H "Authorization: Bearer $TOKEN" \
+                    "$TARGET")
+                  printf "%s " "$CODE"
+                fi
+                case "$CODE" in
+                  200) OK=$((OK+1)) ;;
+                  429) RATE_LIMITED=$((RATE_LIMITED+1)) ;;
+                  *) ERRORS=$((ERRORS+1)) ;;
+                esac
+                if [ $((i % 20)) -eq 0 ]; then
+                  echo " ← batch $((i/20))"
+                fi
+              done
+
+              echo ""
+              echo "=== Phase 3 complete ==="
+              echo "    ✅ 200 OK (passed through):    $OK"
+              echo "    🛡️  429 Rate Limited (shaped):  $RATE_LIMITED"
+              echo "    ❌ Other errors (backend):      $ERRORS"
+              echo ""
+              echo "    Key insight: 429 = system protection (not failure)"
+              echo "    Check Grafana → Kong dashboard: SLO gauge stays GREEN"
+  backoffLimit: 0

@@ -10,3 +10,7 @@ tf_state_bucket         = "YOUR-TF-STATE-BUCKET"
 tf_state_dynamodb_table = "terraform-state-lock"
 project_name            = "gitops-sre-demo"
 root_volume_size_gb     = 30
+
+# GitHub PAT with read:packages scope — for pulling private GHCR images.
+# Alternatively, make packages public in GitHub → Packages → Package Settings.
+# ghcr_token = "ghp_your_token_here"

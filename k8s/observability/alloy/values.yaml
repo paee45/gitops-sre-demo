@@ -4,12 +4,279 @@
 
 controller:
   type: daemonset
+  volumes:
+    extra:
+      # Host path for reading pod log files (Pipeline 3 — log collection)
+      - name: varlog-pods
+        hostPath:
+          path: /var/log/pods
+          type: DirectoryOrCreate
 
 alloy:
   configMap:
     create: true
-    # Content loaded from config.alloy in the same directory
-    # ArgoCD multi-source handles the file embedding
+    content: |
+      // Grafana Alloy River configuration
+      // Four pipelines: pod metrics, kubelet cAdvisor, Kubernetes logs, OTLP traces
+
+      logging {
+        level  = "info"
+        format = "json"
+      }
+
+      // ---------------------------------------------------------------------------
+      // PIPELINE 1 — Pod metrics (annotation-based scraping)
+      // Scrapes pods annotated with prometheus.io/scrape: "true"
+      // ---------------------------------------------------------------------------
+
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pods_scrape" {
+        targets = discovery.kubernetes.pods.targets
+
+        // Keep only pods with prometheus.io/scrape: "true"
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+          regex         = "true"
+          action        = "keep"
+        }
+
+        // Use custom port annotation if present
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_port"]
+          regex         = "(.+)"
+          target_label  = "__address__"
+          replacement   = "${1}"
+          action        = "replace"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_ip", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+          regex         = "(.+);(.+)"
+          target_label  = "__address__"
+          replacement   = "$1:$2"
+          action        = "replace"
+        }
+
+        // Use custom metrics path annotation if present
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+          regex         = "(.+)"
+          target_label  = "__metrics_path__"
+          action        = "replace"
+        }
+
+        // Attach useful Kubernetes labels
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_node_name"]
+          target_label  = "node"
+        }
+      }
+
+      prometheus.scrape "pods" {
+        targets         = discovery.relabel.pods_scrape.output
+        scrape_interval = "30s"
+        forward_to      = [prometheus.relabel.add_cluster.receiver]
+      }
+
+      // ---------------------------------------------------------------------------
+      // PIPELINE 2 — Kubelet cAdvisor (container CPU/memory for cAdvisor dashboard)
+      // ---------------------------------------------------------------------------
+
+      discovery.kubernetes "nodes" {
+        role = "node"
+      }
+
+      discovery.relabel "kubelet_cadvisor" {
+        targets = discovery.kubernetes.nodes.targets
+
+        rule {
+          target_label  = "__address__"
+          replacement   = "kubernetes.default.svc:443"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_node_name"]
+          regex         = "(.+)"
+          target_label  = "__metrics_path__"
+          replacement   = "/api/v1/nodes/$1/proxy/metrics/cadvisor"
+        }
+      }
+
+      prometheus.scrape "cadvisor" {
+        targets         = discovery.relabel.kubelet_cadvisor.output
+        scrape_interval = "30s"
+        scheme          = "https"
+        bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+
+        tls_config {
+          ca_file              = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+          insecure_skip_verify = false
+        }
+
+        forward_to = [prometheus.relabel.add_cluster.receiver]
+      }
+
+      // Add cluster label to all metrics before remote_write
+      prometheus.relabel "add_cluster" {
+        forward_to = [prometheus.remote_write.mimir.receiver]
+
+        rule {
+          target_label = "cluster"
+          replacement  = "k3s-demo"
+        }
+      }
+
+      prometheus.remote_write "mimir" {
+        endpoint {
+          url = "http://mimir-mimir-distributed-distributor.lgtm.svc:8080/api/v1/push"
+
+          queue_config {
+            max_samples_per_send = 1000
+            batch_send_deadline  = "5s"
+          }
+        }
+      }
+
+      // ---------------------------------------------------------------------------
+      // PIPELINE 3 — Kubernetes pod logs via Loki
+      // ---------------------------------------------------------------------------
+
+      discovery.kubernetes "pod_logs" {
+        role = "pod"
+      }
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pod_logs.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_node_name"]
+          target_label  = "node"
+        }
+        // Pod log path for the kubelet log directory
+        rule {
+          source_labels = [
+            "__meta_kubernetes_pod_uid",
+            "__meta_kubernetes_pod_container_name",
+          ]
+          target_label = "__path__"
+          replacement  = "/var/log/pods/*$1*/*$2*/*.log"
+        }
+      }
+
+      local.file_match "pod_logs" {
+        path_targets = discovery.relabel.pod_logs.output
+      }
+
+      loki.source.file "pod_logs" {
+        targets    = local.file_match.pod_logs.targets
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+
+      loki.process "pod_logs" {
+        // Parse JSON logs (service-a and service-b emit JSON via slog)
+        stage.json {
+          expressions = {
+            level   = "level",
+            msg     = "msg",
+            traceID = "traceID",
+            app     = "app",
+          }
+        }
+
+        // Promote traceID as a label for Grafana trace correlation
+        stage.labels {
+          values = {
+            level   = null,
+            traceID = null,
+          }
+        }
+
+        forward_to = [loki.write.loki.receiver]
+      }
+
+      loki.write "loki" {
+        endpoint {
+          url = "http://loki.lgtm.svc:3100/loki/api/v1/push"
+        }
+
+        external_labels = {
+          cluster = "k3s-demo",
+        }
+      }
+
+      // ---------------------------------------------------------------------------
+      // PIPELINE 4 — OTLP trace receiver → Tempo
+      // Go services send traces to Alloy, Alloy forwards to Tempo
+      // ---------------------------------------------------------------------------
+
+      otelcol.receiver.otlp "default" {
+        grpc {
+          endpoint = "0.0.0.0:4317"
+        }
+        http {
+          endpoint = "0.0.0.0:4318"
+        }
+
+        output {
+          traces = [otelcol.processor.attributes.default.input]
+        }
+      }
+
+      otelcol.processor.attributes "default" {
+        action {
+          key    = "cluster"
+          value  = "k3s-demo"
+          action = "insert"
+        }
+
+        output {
+          traces = [otelcol.exporter.otlp.tempo.input]
+        }
+      }
+
+      otelcol.exporter.otlp "tempo" {
+        client {
+          endpoint = "tempo.lgtm.svc:4317"
+
+          tls {
+            insecure = true
+          }
+        }
+      }
 
   resources:
     requests:
@@ -19,13 +286,11 @@ alloy:
       cpu: 200m
       memory: 128Mi
 
-  # RBAC — Alloy needs to read pods, nodes, endpoints for service discovery
-  # and access kubelet for cAdvisor metrics
+  # Mount /var/log/pods from the host for log collection (Pipeline 3)
   mounts:
-    # Mount the Alloy River config
     extra:
-      - name: alloy-config
-        mountPath: /etc/alloy
+      - name: varlog-pods
+        mountPath: /var/log/pods
         readOnly: true
 
 serviceAccount:

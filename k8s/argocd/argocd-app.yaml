@@ -1,0 +1,48 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  # Run before all other apps so ArgoCD is healthy before it syncs children
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # Two-source pattern:
+  #   source[0]  — Helm chart from the official argo-helm registry
+  #   source[1]  — values file from this Git repo (ref alias: values)
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-cd
+      targetRevision: "9.4.17"
+      helm:
+        releaseName: argocd
+        valueFiles:
+          - $values/k8s/argocd/values.yaml
+
+    - repoURL: https://github.com/paee45/gitops-sre-demo.git
+      targetRevision: HEAD
+      ref: values   # makes this source available as $values above
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # Don't delete the namespace if the app is deleted (ArgoCD lives here)
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m

@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------------------
+# Phase 1 Demo — Direct attack on service-a (NO gateway protection)
+#
+# Usage:
+#   kubectl apply -f demo/load-generator/phase1-direct-attack.yaml
+#   kubectl logs -n tools job/phase1-direct-attack -f
+#   kubectl delete -f demo/load-generator/phase1-direct-attack.yaml
+#
+# Watch in Grafana → Deployment Health Dashboard:
+#   - HTTP Error Rate 5xx spikes above 4%
+#   - Latency P95 becomes unstable
+#   - SLO gauge turns RED
+#   - Pod restarts may appear under sustained load
+#
+# Say: "Without traffic control, a single client can degrade system performance
+#       and violate SLOs."
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tools
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase1-direct-attack
+  namespace: tools
+  labels:
+    demo-phase: "1"
+    demo: kong-traffic
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        demo-phase: "1"
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: attacker
+          image: curlimages/curl:latest
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "=== Phase 1: Direct attack on service-a (no Kong protection) ==="
+              echo "Target: http://service-a.apps.svc.cluster.local:8080/api/orders"
+              echo "Concurrency: 50 goroutines x 10 requests = 500 back-to-back"
+              echo ""
+
+              TARGET="http://service-a.apps.svc.cluster.local:8080/api/orders"
+              SUCCESS=0
+              ERRORS=0
+
+              fire_request() {
+                CODE=$(curl -s -o /dev/null -w "%{http_code}" "$TARGET")
+                echo "$CODE"
+              }
+
+              # Fire 500 requests in 50-at-a-time batches
+              for batch in $(seq 1 10); do
+                echo "--- Batch $batch/10: firing 50 concurrent requests ---"
+                codes=""
+                for i in $(seq 1 50); do
+                  fire_request &
+                done
+                wait
+                echo "Batch $batch complete"
+                sleep 0.2
+              done
+
+              echo ""
+              echo "=== Phase 1 complete. Check Grafana → Deployment Health Dashboard ==="
+              echo "    Expected: Error rate spike, latency unstable, SLO gauge RED"
+  backoffLimit: 0

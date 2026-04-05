@@ -1,0 +1,266 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-kong-traffic-dashboard
+  namespace: lgtm
+  labels:
+    grafana_dashboard: "1"
+data:
+  kong-traffic.json: |
+    {
+      "annotations": {"list": []},
+      "description": "Kong API Gateway — 3-phase traffic protection demo. Shows 429 (protection) vs 5xx (failure), SLO preservation under load.",
+      "editable": true,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["kong", "sre-demo", "traffic"],
+      "time": {"from": "now-15m", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Kong — Traffic & Protection",
+      "uid": "kong-traffic-sre",
+      "version": 1,
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 1,
+          "title": "🛡️ Protection Status",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]},
+              "unit": "reqps",
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+          "id": 2,
+          "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "sum(rate(kong_http_requests_total[1m]))", "legendFormat": "RPS", "refId": "A"}],
+          "title": "Total Request Rate",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}]},
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 1},
+          "id": 3,
+          "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "sum(rate(kong_http_requests_total{code=\"429\"}[1m]))", "legendFormat": "429/s", "refId": "A"}],
+          "title": "🛡️ Rate Limited (429) — Protection",
+          "description": "429 = Kong is working. This is NOT a failure — it is traffic shaping.",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}]},
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 1},
+          "id": 4,
+          "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "sum(rate(kong_http_requests_total{code=\"401\"}[1m]))", "legendFormat": "401/s", "refId": "A"}],
+          "title": "🔒 Unauthorized (401) — Auth Guard",
+          "description": "Unauthenticated requests stopped at the edge. Backend never sees them.",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.01}]},
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 1},
+          "id": 5,
+          "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "sum(rate(kong_http_requests_total{code=~\"5..\"}[1m]))", "legendFormat": "5xx/s", "refId": "A"}],
+          "title": "💥 Backend Errors (5xx) — Failure",
+          "description": "5xx = backend failure. Should stay near zero when Kong protection is active.",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "max": 100,
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 80}, {"color": "green", "value": 95}]},
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 1},
+          "id": 6,
+          "options": {"minVizHeight": 75, "minVizWidth": 75, "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showThresholdLabels": false, "showThresholdMarkers": true},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "100 * sum(rate(kong_http_requests_total{code=\"200\"}[1m])) / clamp_min(sum(rate(kong_http_requests_total[1m])),1)", "legendFormat": "Pass Rate", "refId": "A"}],
+          "title": "✅ Pass Rate (200s / Total)",
+          "description": "What % of all requests reached the backend successfully. High during normal traffic, lower during attack (429s inflate denominator).",
+          "type": "gauge"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+          "id": 10,
+          "title": "📊 Request Breakdown Over Time",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "custom": {"lineWidth": 2, "fillOpacity": 10}, "unit": "reqps"},
+            "overrides": [
+              {"matcher": {"id": "byName", "options": "200 OK"}, "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]},
+              {"matcher": {"id": "byName", "options": "429 Rate Limited"}, "properties": [{"id": "color", "value": {"fixedColor": "orange", "mode": "fixed"}}]},
+              {"matcher": {"id": "byName", "options": "401 Unauthorized"}, "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]},
+              {"matcher": {"id": "byName", "options": "5xx Errors"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]}
+            ]
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 6},
+          "id": 11,
+          "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "sum(rate(kong_http_requests_total{code=\"200\"}[1m]))", "legendFormat": "200 OK", "refId": "A"},
+            {"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "sum(rate(kong_http_requests_total{code=\"429\"}[1m]))", "legendFormat": "429 Rate Limited", "refId": "B"},
+            {"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "sum(rate(kong_http_requests_total{code=\"401\"}[1m]))", "legendFormat": "401 Unauthorized", "refId": "C"},
+            {"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "sum(rate(kong_http_requests_total{code=~\"5..\"}[1m]))", "legendFormat": "5xx Errors", "refId": "D"}
+          ],
+          "title": "Requests by Status Code",
+          "description": "Phase 1 (no gateway): 5xx spikes. Phase 2 (Kong, no auth): 401 spikes. Phase 3 (Kong, rate limited): 429 rises, 5xx stays flat. SRE insight: 429 is protection, 5xx is failure.",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14},
+          "id": 20,
+          "title": "⏱️ Latency",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "custom": {"lineWidth": 2}, "unit": "ms"},
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
+          "id": 21,
+          "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "histogram_quantile(0.95, sum(rate(kong_request_latency_ms_bucket[5m])) by (le))", "legendFormat": "P95 total latency", "refId": "A"},
+            {"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "histogram_quantile(0.50, sum(rate(kong_request_latency_ms_bucket[5m])) by (le))", "legendFormat": "P50 total latency", "refId": "B"}
+          ],
+          "title": "Kong Total Latency (P95, P50)",
+          "description": "Total time observed by Kong (includes upstream time). Should stay flat when Kong protection is active.",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "custom": {"lineWidth": 2}, "unit": "ms"},
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+          "id": 22,
+          "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "histogram_quantile(0.95, sum(rate(kong_upstream_latency_ms_bucket[5m])) by (le))", "legendFormat": "P95 upstream (service-a)", "refId": "A"},
+            {"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "histogram_quantile(0.95, sum(rate(order_processing_duration_seconds_bucket[5m])) by (le)) * 1000", "legendFormat": "P95 service-a order processing", "refId": "B"}
+          ],
+          "title": "Upstream Latency — service-a (P95)",
+          "description": "Time Kong spends waiting for service-a. vs service-a internal processing time. Phase 1 vs Phase 3 comparison shows gateway effect on backend stability.",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23},
+          "id": 30,
+          "title": "🎯 SLO — Delivery with Gateway",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "max": 100,
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 95}, {"color": "green", "value": 99}]},
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 24},
+          "id": 31,
+          "options": {"minVizHeight": 75, "minVizWidth": 75, "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showThresholdLabels": false, "showThresholdMarkers": true},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "100 - (100 * sum(rate(http_requests_total{status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])),1))", "legendFormat": "Error SLO", "refId": "A"}],
+          "title": "🎯 SLO: service-a Error Rate < 1%",
+          "description": "Based on service-a's own Prometheus metrics (direct, not via Kong). Should stay GREEN when Kong absorbs overload at the edge.",
+          "type": "gauge"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "max": 2000,
+              "min": 0,
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 500}, {"color": "red", "value": 1000}]},
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 6, "w": 8, "x": 8, "y": 24},
+          "id": 32,
+          "options": {"minVizHeight": 75, "minVizWidth": 75, "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showThresholdLabels": true, "showThresholdMarkers": true},
+          "targets": [{"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "histogram_quantile(0.95, sum(rate(order_processing_duration_seconds_bucket[5m])) by (le)) * 1000", "legendFormat": "P95 ms", "refId": "A"}],
+          "title": "🎯 SLO: service-a Latency P95 < 500 ms",
+          "description": "service-a's own order processing P95. Stays GREEN under Kong protection, spikes RED during Phase 1 direct attack.",
+          "type": "gauge"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "fieldConfig": {
+            "defaults": {"color": {"mode": "palette-classic"}, "custom": {"lineWidth": 2, "fillOpacity": 20}, "unit": "reqps"},
+            "overrides": [
+              {"matcher": {"id": "byName", "options": "✅ 200 Backend"}, "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]},
+              {"matcher": {"id": "byName", "options": "🛡️ 429 Shaped"}, "properties": [{"id": "color", "value": {"fixedColor": "orange", "mode": "fixed"}}]}
+            ]
+          },
+          "gridPos": {"h": 6, "w": 8, "x": 16, "y": 24},
+          "id": 33,
+          "options": {"legend": {"calcs": ["mean"], "displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+          "targets": [
+            {"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "sum(rate(kong_http_requests_total{code=\"200\"}[1m]))", "legendFormat": "✅ 200 Backend", "refId": "A"},
+            {"datasource": {"type": "prometheus", "uid": "mimir"}, "expr": "sum(rate(kong_http_requests_total{code=\"429\"}[1m]))", "legendFormat": "🛡️ 429 Shaped", "refId": "B"}
+          ],
+          "title": "Traffic Shaping (200 vs 429)",
+          "description": "The system is resilient not because it handles infinite load, but because it enforces limits. Backend handles stable load (green); excess is shaped (orange).",
+          "type": "timeseries"
+        }
+      ]
+    }

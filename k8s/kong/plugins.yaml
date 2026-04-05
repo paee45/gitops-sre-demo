@@ -1,0 +1,61 @@
+# ---------------------------------------------------------------------------
+# Kong Plugins — applied AFTER kong chart (sync-wave: 2)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Global: Prometheus metrics
+# Label `global: "true"` tells KIC to attach this plugin to every route
+# Exposes /metrics on the Kong status port (:8100) for Alloy scraping
+# ---------------------------------------------------------------------------
+apiVersion: configuration.konghq.com/v1
+kind: KongClusterPlugin
+metadata:
+  name: prometheus-global
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    kubernetes.io/ingress.class: kong
+  labels:
+    global: "true"
+plugin: prometheus
+config:
+  status_code_metrics: true
+  latency_metrics: true
+  upstream_health_metrics: true
+---
+# ---------------------------------------------------------------------------
+# Rate limiting — 60 requests/minute per IP, local counters (no Redis needed)
+# Returns 429 when exceeded — signals protection, not failure
+# ---------------------------------------------------------------------------
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: rate-limit-orders
+  namespace: apps
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+plugin: rate-limiting
+config:
+  minute: 60
+  policy: local
+  limit_by: ip
+  error_code: 429
+  error_message: "Rate limit exceeded — slow down."
+  hide_client_headers: false   # Show RateLimit-* headers in response (demo visible)
+---
+# ---------------------------------------------------------------------------
+# JWT authentication — validates HS256 tokens signed with the consumer secret
+# Unauthenticated requests receive 401 before reaching service-a
+# ---------------------------------------------------------------------------
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: jwt-orders
+  namespace: apps
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+plugin: jwt
+config:
+  claims_to_verify:
+    - exp
+  key_claim_name: iss
+  secret_is_base64: false

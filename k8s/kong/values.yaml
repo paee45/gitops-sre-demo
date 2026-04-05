@@ -1,0 +1,111 @@
+# Kong API Gateway — DB-less mode (no Postgres) with Ingress Controller
+# Chart: kong/kong 2.38.0 — Kong OSS 3.7
+# NodePort 8000 — opened in the EC2 security group by Terraform
+
+# ---------------------------------------------------------------------------
+# Ingress Controller — translates K8s Ingress + KongPlugin CRDs into config
+# ---------------------------------------------------------------------------
+ingressController:
+  enabled: true
+  installCRDs: false         # CRDs managed by ArgoCD ServerSideApply
+  ingressClass: kong
+  image:
+    repository: kong/kubernetes-ingress-controller
+    tag: "3.3"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# ---------------------------------------------------------------------------
+# Kong Gateway image
+# ---------------------------------------------------------------------------
+image:
+  repository: kong
+  tag: "3.7"
+
+# ---------------------------------------------------------------------------
+# Kong runtime config (DB-less mode)
+# ---------------------------------------------------------------------------
+env:
+  database: "off"
+  router_flavor: expressions   # Kong 3.x expression router
+  plugins: bundled             # All bundled plugins (includes rate-limiting, jwt, prometheus)
+  anonymous_reports: "off"
+  # Status endpoint for /metrics scraping — binds 0.0.0.0 so Alloy can reach it
+  status_listen: "0.0.0.0:8100"
+
+# ---------------------------------------------------------------------------
+# Proxy — NodePort 8000 (range extended in K3s via --service-node-port-range)
+# ---------------------------------------------------------------------------
+proxy:
+  enabled: true
+  type: NodePort
+  http:
+    enabled: true
+    servicePort: 80
+    containerPort: 8000
+    nodePort: 8000
+  tls:
+    enabled: false             # HTTP only for demo
+
+# ---------------------------------------------------------------------------
+# Admin API — ClusterIP only (not exposed externally)
+# ---------------------------------------------------------------------------
+admin:
+  enabled: true
+  type: ClusterIP
+  http:
+    enabled: true
+    servicePort: 8001
+    containerPort: 8001
+
+# ---------------------------------------------------------------------------
+# Resource limits tuned for single t3.medium node
+# ---------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# Pod annotations — Alloy scrapes :8100/metrics for Prometheus metrics
+# The global KongClusterPlugin (prometheus) exposes metrics on the status port
+# ---------------------------------------------------------------------------
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8100"
+  prometheus.io/path: "/metrics"
+
+# ---------------------------------------------------------------------------
+# Probes — use status endpoint
+# ---------------------------------------------------------------------------
+readinessProbe:
+  httpGet:
+    path: /status
+    port: 8100
+    scheme: HTTP
+  initialDelaySeconds: 15
+  periodSeconds: 10
+
+livenessProbe:
+  httpGet:
+    path: /status
+    port: 8100
+    scheme: HTTP
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+# No persistence needed — DB-less mode
+persistence:
+  enabled: false
+
+# Enterprise features disabled (OSS demo)
+enterprise:
+  enabled: false

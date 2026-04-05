@@ -1,26 +1,29 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: loki
+  name: kong
   namespace: argocd
+  annotations:
+    # sync-wave: 1 — installs Kong chart before its config resources (wave 2)
+    argocd.argoproj.io/sync-wave: "1"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   sources:
-    - repoURL: https://grafana.github.io/helm-charts
-      chart: loki
-      targetRevision: "6.55.0"
+    - repoURL: https://charts.konghq.com
+      chart: kong
+      targetRevision: "2.38.0"
       helm:
-        releaseName: loki
+        releaseName: kong
         valueFiles:
-          - $values/k8s/observability/loki/values.yaml
+          - $values/k8s/kong/values.yaml
     - repoURL: https://github.com/paee45/gitops-sre-demo.git
       targetRevision: HEAD
       ref: values
   destination:
     server: https://kubernetes.default.svc
-    namespace: lgtm
+    namespace: kong
   syncPolicy:
     automated:
       prune: true
@@ -31,6 +34,6 @@ spec:
     retry:
       limit: 5
       backoff:
-        duration: 10s
+        duration: 15s
         factor: 2
         maxDuration: 5m

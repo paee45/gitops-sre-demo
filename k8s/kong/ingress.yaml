@@ -1,0 +1,31 @@
+# ---------------------------------------------------------------------------
+# Kong Ingress for service-a
+# Routes all /api/orders traffic through Kong with JWT auth + rate limiting
+# Applied AFTER kong chart (sync-wave: 2)
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: service-a
+  namespace: apps
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    # Attach both plugins — order matters: jwt runs first, then rate-limit
+    konghq.com/plugins: "jwt-orders,rate-limit-orders"
+    konghq.com/strip-path: "false"
+    # Connection timeout tuning (service-a has up to 800ms latency)
+    konghq.com/connect-timeout: "5000"
+    konghq.com/read-timeout: "10000"
+    konghq.com/write-timeout: "10000"
+spec:
+  ingressClassName: kong
+  rules:
+    - http:
+        paths:
+          - path: /api/orders
+            pathType: Prefix
+            backend:
+              service:
+                name: service-a
+                port:
+                  number: 8080

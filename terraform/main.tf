@@ -664,6 +664,24 @@ resource "aws_security_group" "k3s" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Kong API Gateway proxy NodePort
+  ingress {
+    description = "Kong Proxy"
+    from_port   = 8000
+    to_port     = 8000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Service Dashboard NodePort
+  ingress {
+    description = "Service Dashboard"
+    from_port   = 8090
+    to_port     = 8090
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   egress {
     description = "All outbound"
     from_port   = 0
@@ -683,9 +701,10 @@ resource "aws_security_group" "k3s" {
 
 locals {
   user_data = templatefile("${path.module}/user-data.sh", {
-    github_org    = var.github_org
-    github_repo   = var.github_repo
-    project_name  = var.project_name
+    github_org   = var.github_org
+    github_repo  = var.github_repo
+    project_name = var.project_name
+    ghcr_token   = var.ghcr_token
   })
 }
 

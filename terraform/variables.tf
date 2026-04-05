@@ -54,3 +54,10 @@ variable "root_volume_size_gb" {
   type        = number
   default     = 30
 }
+
+variable "ghcr_token" {
+  description = "GitHub Personal Access Token with read:packages scope for pulling private GHCR images. Leave empty if GHCR packages are made public in GitHub Package Settings."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

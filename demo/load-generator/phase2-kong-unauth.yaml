@@ -1,0 +1,77 @@
+# ---------------------------------------------------------------------------
+# Phase 2 Demo — Attack through Kong WITHOUT authentication
+#
+# Usage:
+#   kubectl apply -f demo/load-generator/phase2-kong-unauth.yaml
+#   kubectl logs -n tools job/phase2-kong-unauth -f
+#   kubectl delete -f demo/load-generator/phase2-kong-unauth.yaml
+#
+# Watch in Grafana → Kong Traffic & Protection Dashboard:
+#   - 401 Unauthorized count spikes
+#   - service-a backend receives ZERO of these requests (JWT rejected at edge)
+#   - service-a error rate + latency → STABLE
+#   - SLO gauge stays GREEN (backend is protected)
+#
+# Say: "All APIs are protected by default — unauthenticated traffic is
+#       rejected at the edge. The backend never sees it."
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tools
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: phase2-kong-unauth
+  namespace: tools
+  labels:
+    demo-phase: "2"
+    demo: kong-traffic
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        demo-phase: "2"
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: attacker
+          image: curlimages/curl:latest
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "=== Phase 2: Attack through Kong WITHOUT JWT (all should be 401) ==="
+              echo "Target: http://kong-kong-proxy.kong.svc.cluster.local:80/api/orders"
+              echo "No Authorization header — Kong should reject all requests"
+              echo ""
+
+              TARGET="http://kong-kong-proxy.kong.svc.cluster.local:80/api/orders"
+              TOTAL=200
+              BLOCKED=0
+
+              for i in $(seq 1 $TOTAL); do
+                CODE=$(curl -s -o /dev/null -w "%{http_code}" "$TARGET")
+                printf "%s " "$CODE"
+                if [ "$CODE" = "401" ]; then
+                  BLOCKED=$((BLOCKED + 1))
+                fi
+                if [ $((i % 20)) -eq 0 ]; then
+                  echo " ← batch $((i/20))"
+                fi
+              done
+
+              echo ""
+              echo "=== Phase 2 complete ==="
+              echo "    $BLOCKED / $TOTAL requests blocked at edge (401 Unauthorized)"
+              echo "    service-a backend: untouched"
+              echo "    Check Grafana → Kong dashboard: 401 spike, backend metrics flat"
+  backoffLimit: 0

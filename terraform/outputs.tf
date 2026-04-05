@@ -23,6 +23,16 @@ output "argocd_url" {
   value       = "http://${aws_instance.k3s.public_ip}:32080"
 }
 
+output "kong_url" {
+  description = "Kong API Gateway proxy URL (NodePort)"
+  value       = "http://${aws_instance.k3s.public_ip}:8000"
+}
+
+output "dashboard_url" {
+  description = "Service Dashboard URL (NodePort)"
+  value       = "http://${aws_instance.k3s.public_ip}:8090"
+}
+
 output "iam_role_arn" {
   description = "ARN of the GitHub Actions APPLY IAM role — set as secret AWS_ROLE_ARN"
   value       = aws_iam_role.github_actions.arn

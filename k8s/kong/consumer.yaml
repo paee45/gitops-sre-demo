@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# Kong Consumer — demo-client (used for JWT-authenticated load tests)
+# Applied AFTER kong chart (sync-wave: 2)
+# ---------------------------------------------------------------------------
+
+# JWT credential secret
+# key    = the `iss` claim your JWT must contain
+# secret = HS256 signing key (override before production — this is a demo default)
+#
+# To regenerate a demo token:
+#   python3 -c "
+#   import hmac, hashlib, base64, json
+#   def b64(d): return base64.urlsafe_b64encode(d if isinstance(d,bytes) else d.encode()).rstrip(b'=').decode()
+#   h = b64(json.dumps({'alg':'HS256','typ':'JWT'}))
+#   p = b64(json.dumps({'iss':'demo-client','exp':9999999999}))
+#   s = b64(hmac.new(b'gitops-sre-demo-jwt-secret-changeme', f'{h}.{p}'.encode(), hashlib.sha256).digest())
+#   print(f'{h}.{p}.{s}')
+#   "
+apiVersion: v1
+kind: Secret
+metadata:
+  name: demo-client-jwt
+  namespace: apps
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    konghq.com/credential: jwt
+stringData:
+  key: "demo-client"
+  algorithm: "HS256"
+  secret: "gitops-sre-demo-jwt-secret-changeme"   # Change for any real deployment
+---
+apiVersion: configuration.konghq.com/v1
+kind: KongConsumer
+metadata:
+  name: demo-client
+  namespace: apps
+  annotations:
+    kubernetes.io/ingress.class: kong
+    argocd.argoproj.io/sync-wave: "2"
+username: demo-client
+credentials:
+  - demo-client-jwt

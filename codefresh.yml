@@ -1,0 +1,246 @@
+version: "1.0"
+# ──────────────────────────────────────────────────────────────────────────────
+# Codefresh — GitOps CD Promotion Pipeline
+#
+# PURPOSE  : Visual promotion board — dev → staging → production
+# CI path  : GitHub Actions (.github/workflows/build-images.yml) handles
+#            lint, test, docker build, and GHCR push.
+#            Codefresh picks up after the image exists.
+#
+# Trigger options
+#   A. Automatic — GitHub Actions calls the Codefresh API after a successful
+#      image push (see "Triggering from GitHub Actions" below).
+#   B. Manual   — Codefresh UI → Run Pipeline → supply IMAGE_TAG.
+#
+# Pipeline input (set as pipeline variables or passed via API):
+#   IMAGE_TAG     short SHA from GitHub Actions (e.g. a3f9d1c) — REQUIRED
+#   SERVICE_A_IMG full image ref for service-a  (default built below)
+#   SERVICE_B_IMG full image ref for service-b  (default built below)
+#
+# What it does
+#   1. dev        — auto-promotes (updates k8s/envs/dev.env, commits)
+#   2. staging    — waits for manual approval, then promotes
+#   3. production — shows a git diff preview, waits for approval, then promotes
+#                   and creates a signed git tag vYYYYMMDD-<sha>
+#
+# After each step ArgoCD detects the committed change and syncs the
+# matching environment (appResyncPeriod = 180 s, selfHeal = true).
+#
+# ── One-time Codefresh setup ───────────────────────────────────────────────────
+# 1. Pipeline variables (Pipelines → <this pipeline> → Variables)
+#      GITHUB_TOKEN   Secret — PAT with repo scope (git push for promotion commits)
+#      IMAGE_TAG      Plain  — set per-run via API or leave blank for manual entry
+#
+# 2. Trigger: Codefresh UI → Triggers → Add → "Repository" or use API hook
+#    (see "Triggering from GitHub Actions" section in README)
+#
+# ── Triggering from GitHub Actions ────────────────────────────────────────────
+# Add the following step at the END of .github/workflows/build-images.yml
+# to fire this pipeline automatically after images are pushed:
+#
+#   - name: Trigger Codefresh CD promotion
+#     if: github.ref == 'refs/heads/main'
+#     run: |
+#       curl -s -X POST \
+#         -H "Authorization: Bearer ${{ secrets.CODEFRESH_API_TOKEN }}" \
+#         -H "Content-Type: application/json" \
+#         -d "{\"variables\":[{\"key\":\"IMAGE_TAG\",\"value\":\"${GITHUB_SHA::7}\"}]}" \
+#         "https://g.codefresh.io/api/builds/paee45/gitops-sre-demo"
+#     env:
+#       CODEFRESH_API_TOKEN: ${{ secrets.CODEFRESH_API_TOKEN }}
+#
+# Required GitHub secret: CODEFRESH_API_TOKEN (Codefresh → User Settings → API Keys)
+# ──────────────────────────────────────────────────────────────────────────────
+
+stages:
+  - dev
+  - staging
+  - production
+
+steps:
+  # ── Clone ─────────────────────────────────────────────────────────────────
+  clone:
+    title: "Clone repository"
+    type: git-clone
+    stage: dev
+    repo: "${{CF_REPO_OWNER}}/${{CF_REPO_NAME}}"
+    revision: main
+    git: github
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # STAGE 1 — dev  (auto-promote, no approval needed)
+  # Updates k8s/envs/dev.env with the new image tag and commits.
+  # ─────────────────────────────────────────────────────────────────────────
+  promote_dev:
+    title: "Promote → dev"
+    type: freestyle
+    stage: dev
+    image: "alpine/git:latest"
+    working_directory: "${{CF_VOLUME_PATH}}/${{CF_REPO_NAME}}"
+    commands:
+      - git config user.email "codefresh-cd[bot]@users.noreply.github.com"
+      - git config user.name "Codefresh CD"
+      - git remote set-url origin "https://x-token-auth:${{GITHUB_TOKEN}}@github.com/${{CF_REPO_OWNER}}/${{CF_REPO_NAME}}.git"
+      - git pull --rebase origin main
+      # Write the promoted image tags as the dev environment pin
+      - |
+        cat > k8s/envs/dev.env <<EOF
+        SERVICE_A_IMAGE=ghcr.io/${{CF_REPO_OWNER}}/service-a:${{IMAGE_TAG}}
+        SERVICE_B_IMAGE=ghcr.io/${{CF_REPO_OWNER}}/service-b:${{IMAGE_TAG}}
+        PROMOTED_BY=codefresh
+        PROMOTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        PIPELINE_URL=https://g.codefresh.io/build/${{CF_BUILD_ID}}
+        EOF
+      - git add k8s/envs/dev.env
+      - |
+        git diff --cached --quiet ||
+        git commit -m "cd(dev): promote → ${{IMAGE_TAG}} [skip ci]
+
+        Pipeline: ${{CF_BUILD_URL}}
+        Approved: auto"
+      - git push origin HEAD:main
+    depends_on: [clone]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # STAGE 2 — staging  (manual approval gate)
+  # ─────────────────────────────────────────────────────────────────────────
+  approve_staging:
+    title: "Approve promotion to staging"
+    type: pending-approval
+    stage: staging
+    timeout:
+      duration: 48
+      finalState: denied
+    depends_on: [promote_dev]
+
+  show_staging_diff:
+    title: "Preview — staging changes"
+    type: freestyle
+    stage: staging
+    image: "alpine/git:latest"
+    working_directory: "${{CF_VOLUME_PATH}}/${{CF_REPO_NAME}}"
+    commands:
+      - echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - echo "Promoting service-a + service-b  →  staging"
+      - echo "New image tag  :  ${{IMAGE_TAG}}"
+      - echo "Current staging:"
+      - cat k8s/envs/staging.env || echo "(no staging pin yet)"
+      - echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    when:
+      steps:
+        - name: approve_staging
+          on: [approved]
+    depends_on: [approve_staging]
+
+  promote_staging:
+    title: "Promote → staging"
+    type: freestyle
+    stage: staging
+    image: "alpine/git:latest"
+    working_directory: "${{CF_VOLUME_PATH}}/${{CF_REPO_NAME}}"
+    commands:
+      - git config user.email "codefresh-cd[bot]@users.noreply.github.com"
+      - git config user.name "Codefresh CD"
+      - git remote set-url origin "https://x-token-auth:${{GITHUB_TOKEN}}@github.com/${{CF_REPO_OWNER}}/${{CF_REPO_NAME}}.git"
+      - git pull --rebase origin main
+      - |
+        cat > k8s/envs/staging.env <<EOF
+        SERVICE_A_IMAGE=ghcr.io/${{CF_REPO_OWNER}}/service-a:${{IMAGE_TAG}}
+        SERVICE_B_IMAGE=ghcr.io/${{CF_REPO_OWNER}}/service-b:${{IMAGE_TAG}}
+        PROMOTED_BY=codefresh
+        PROMOTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        PIPELINE_URL=https://g.codefresh.io/build/${{CF_BUILD_ID}}
+        EOF
+      - git add k8s/envs/staging.env
+      - |
+        git diff --cached --quiet ||
+        git commit -m "cd(staging): promote → ${{IMAGE_TAG}} [skip ci]
+
+        Pipeline: ${{CF_BUILD_URL}}
+        Approved: manual"
+      - git push origin HEAD:main
+    when:
+      steps:
+        - name: approve_staging
+          on: [approved]
+    depends_on: [show_staging_diff]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # STAGE 3 — production  (diff preview + manual approval + signed git tag)
+  # ─────────────────────────────────────────────────────────────────────────
+  approve_production:
+    title: "Approve promotion to production"
+    type: pending-approval
+    stage: production
+    timeout:
+      duration: 72
+      finalState: denied
+    depends_on: [promote_staging]
+
+  show_production_diff:
+    title: "Preview — production changes"
+    type: freestyle
+    stage: production
+    image: "alpine/git:latest"
+    working_directory: "${{CF_VOLUME_PATH}}/${{CF_REPO_NAME}}"
+    commands:
+      - echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - echo "Promoting service-a + service-b  →  PRODUCTION"
+      - echo "New image tag  :  ${{IMAGE_TAG}}"
+      - echo "Current production:"
+      - cat k8s/envs/production.env || echo "(no production pin yet)"
+      - echo "--- Deployment manifests diff (last commit) ---"
+      - git log --oneline -5
+      - echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    when:
+      steps:
+        - name: approve_production
+          on: [approved]
+    depends_on: [approve_production]
+
+  promote_production:
+    title: "Promote → production"
+    type: freestyle
+    stage: production
+    image: "alpine/git:latest"
+    working_directory: "${{CF_VOLUME_PATH}}/${{CF_REPO_NAME}}"
+    commands:
+      - git config user.email "codefresh-cd[bot]@users.noreply.github.com"
+      - git config user.name "Codefresh CD"
+      - git remote set-url origin "https://x-token-auth:${{GITHUB_TOKEN}}@github.com/${{CF_REPO_OWNER}}/${{CF_REPO_NAME}}.git"
+      - git pull --rebase origin main
+      # Update the k8s deployment manifests (ArgoCD watches these)
+      - >
+        sed -i
+        "s|image: ghcr.io/${{CF_REPO_OWNER}}/service-a:.*|image: ghcr.io/${{CF_REPO_OWNER}}/service-a:${{IMAGE_TAG}}|"
+        k8s/apps/service-a/deployment.yaml
+      - >
+        sed -i
+        "s|image: ghcr.io/${{CF_REPO_OWNER}}/service-b:.*|image: ghcr.io/${{CF_REPO_OWNER}}/service-b:${{IMAGE_TAG}}|"
+        k8s/apps/service-b/deployment.yaml
+      # Write production pin file
+      - |
+        cat > k8s/envs/production.env <<EOF
+        SERVICE_A_IMAGE=ghcr.io/${{CF_REPO_OWNER}}/service-a:${{IMAGE_TAG}}
+        SERVICE_B_IMAGE=ghcr.io/${{CF_REPO_OWNER}}/service-b:${{IMAGE_TAG}}
+        PROMOTED_BY=codefresh
+        PROMOTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        PIPELINE_URL=https://g.codefresh.io/build/${{CF_BUILD_ID}}
+        EOF
+      - git add k8s/apps/service-a/deployment.yaml k8s/apps/service-b/deployment.yaml k8s/envs/production.env
+      - |
+        git diff --cached --quiet ||
+        git commit -m "cd(production): promote → ${{IMAGE_TAG}} [skip ci]
+
+        Pipeline: ${{CF_BUILD_URL}}
+        Approved: manual"
+      - git push origin HEAD:main
+      # Create a signed release tag for auditability
+      - git tag -a "release-${{IMAGE_TAG}}" -m "Production release ${{IMAGE_TAG}} promoted via Codefresh pipeline ${{CF_BUILD_ID}}"
+      - git push origin "release-${{IMAGE_TAG}}"
+    when:
+      steps:
+        - name: approve_production
+          on: [approved]
+    depends_on: [show_production_diff]
+

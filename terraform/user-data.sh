@@ -48,6 +48,7 @@ if ! command -v k3s &>/dev/null; then
       --disable traefik \
       --disable servicelb \
       --write-kubeconfig-mode 644 \
+      --service-node-port-range=1024-65535 \
       --kubelet-arg eviction-hard=memory.available<256Mi \
       --kubelet-arg eviction-soft=memory.available<512Mi \
       --kubelet-arg eviction-soft-grace-period=memory.available=2m" \
@@ -174,7 +175,23 @@ helm upgrade --install argocd argo/argo-cd \
 echo "ArgoCD deployed"
 
 # ---------------------------------------------------------------------------
-# 7. Apply the Root App of Apps
+# 7. GHCR imagePullSecret — for pulling private container images
+# ---------------------------------------------------------------------------
+if [ -n "${ghcr_token}" ]; then
+  kubectl create namespace apps --dry-run=client -o yaml | kubectl apply -f -
+  kubectl create secret docker-registry ghcr-pull-secret \
+    --docker-server=ghcr.io \
+    --docker-username=${github_org} \
+    --docker-password="${ghcr_token}" \
+    --namespace=apps \
+    --dry-run=client -o yaml | kubectl apply -f -
+  echo "GHCR imagePullSecret created in namespace: apps"
+else
+  echo "ghcr_token not set — ensure GHCR packages are public (GitHub → Packages → Package Settings → Change visibility → Public)"
+fi
+
+# ---------------------------------------------------------------------------
+# 8. Apply the Root App of Apps
 # ---------------------------------------------------------------------------
 cat > /tmp/root-app.yaml <<EOF
 apiVersion: argoproj.io/v1alpha1

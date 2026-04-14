@@ -293,6 +293,14 @@ alloy:
         mountPath: /var/log/pods
         readOnly: true
 
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
 serviceAccount:
   create: true
   name: alloy

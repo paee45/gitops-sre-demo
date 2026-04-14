@@ -91,5 +91,13 @@ monitoring:
 gateway:
   enabled: false
 
+# Disable memcached StatefulSets — not needed for SingleBinary mode
+# (these were causing loki-chunks-cache-0 to be stuck Pending)
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
 test:
   enabled: false

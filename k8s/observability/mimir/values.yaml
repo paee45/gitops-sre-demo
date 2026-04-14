@@ -43,6 +43,10 @@ mimir:
     memberlist:
       join_members: []
 
+    # Disable Kafka-based ingest storage (not needed for demo)
+    ingest_storage:
+      enabled: false
+
 # Run all components as a single Deployment (monolithic)
 # Override individual component replicas to 0 except for the all-in-one
 ingester:
@@ -50,10 +54,10 @@ ingester:
   resources:
     requests:
       cpu: 100m
-      memory: 192Mi
+      memory: 128Mi
     limits:
       cpu: 500m
-      memory: 768Mi
+      memory: 512Mi
   persistentVolume:
     enabled: true
     size: 20Gi
@@ -131,9 +135,36 @@ alertmanager:
 minio:
   enabled: false
 
-# Nginx gateway — disabled for simplicity
+# Nginx gateway — disabled
 nginx:
   enabled: false
+
+# Mimir gateway — disabled for local dev
+gateway:
+  replicas: 0
+
+# Kafka — disabled (ingest_storage.enabled: false above)
+kafka:
+  enabled: false
+
+# Rollout operator — not needed for demo
+rollout_operator:
+  enabled: false
+
+# Overrides exporter — not needed for demo (was CrashLoopBackOff)
+overrides_exporter:
+  replicas: 0
+
+# Reduce query-scheduler replicas (default is 2, 1 is enough for demo)
+query_scheduler:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
 
 # Disable ServiceMonitor CRDs
 serviceMonitor:

@@ -47,7 +47,7 @@ repoServer:
       memory: 1Gi
 
 applicationSet:
-  replicas: 1
+  replicas: 0   # Not used in this demo (no ApplicationSets)
   resources:
     requests:
       cpu: 50m
@@ -74,10 +74,10 @@ controller:
   resources:
     requests:
       cpu: 100m
-      memory: 192Mi
+      memory: 128Mi
     limits:
       cpu: 500m
-      memory: 768Mi
+      memory: 512Mi
 
 configs:
   params:

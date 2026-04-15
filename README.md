@@ -518,6 +518,128 @@ Alloy also scrapes kubelet cAdvisor on every node and forwards to Mimir.
 
 ---
 
+## AIOps Strategy — AI-Powered SRE
+
+> A deep background in IBM Data Engineering, IBM AI/ML (IsolationForest, Prophet, Flask/Python), BI (Power BI, Tableau), and Azure/Kubernetes architecture maps directly to the SRE industry's shift toward AIOps. The framework below shows how those skills converts to three pillars that reduce MTTR (Mean Time To Resolution).
+
+### The Three AIOps Pillars
+
+| Pillar | SRE Problem Solved | Applicable Skills |
+|---|---|---|
+| **Log Anomaly Detection** | Replace static threshold alerts with ML-based baseline comparison on Loki streams | IBM AI Engineering, Python |
+| **Metric Forecasting** | Predict SLO breaches before they occur using historical Mimir/Prometheus data | IBM Data Science, Power BI, Tableau |
+| **LLM-Augmented Incident Response** | Auto-summarize incident context from Kong + application logs in plain English in seconds | IBM AI Developer, Flask |
+
+### Pillar 1 — Log Anomaly Detection
+
+Static threshold alerts are binary and fire too late (system is already broken) or too early (noise). A Loki ratio query detects anomalies _relative to a rolling baseline_ — no manual threshold tuning:
+
+```promql
+# Current 5-min error rate as a multiple of the 1-hour rolling baseline
+sum(rate({namespace="apps"} |= "error" [5m]))
+  / sum(rate({namespace="apps"} |= "error" [1h]))
+```
+
+A ratio > 3× indicates the system is behaving abnormally even if the absolute error count is low. Alert at 3×, page at 10×.
+
+**Next step:** Export Loki time-series as feature vectors and apply an IsolationForest model (unsupervised — no labelled training data needed) to detect multi-dimensional log pattern shifts that single-metric PromQL ratios cannot capture alone.
+
+### Pillar 2 — Metric Forecasting (Mimir + Python)
+
+Seven days of Kong request-rate data in Mimir can power a time-series forecast that predicts when traffic will exceed the rate limit _before_ the `429`s start:
+
+```python
+# Query Mimir (Prometheus-compatible API) + Prophet forecast
+import requests, pandas as pd
+from prophet import Prophet
+
+resp = requests.get("http://mimir:9009/prometheus/api/v1/query_range", params={
+    "query": "sum(rate(kong_http_requests_total[5m]))",
+    "start": "now-7d", "end": "now", "step": "5m",
+})
+values = resp.json()["data"]["result"][0]["values"]
+df = pd.DataFrame(values, columns=["ds", "y"])
+df["ds"] = pd.to_datetime(df["ds"].astype(float), unit="s")
+df["y"]  = df["y"].astype(float)
+
+model    = Prophet(changepoint_prior_scale=0.05)
+model.fit(df)
+future   = model.make_future_dataframe(periods=60, freq="5min")
+forecast = model.predict(future)
+# forecast["yhat"] → predicted RPS for next 60 min
+# Alert if forecast["yhat"].max() > rate_limit_per_minute
+```
+
+This is the same Time Series + BI forecasting pattern used in Power BI and Tableau — the only difference is the data source is a Prometheus HTTP endpoint instead of a CSV or database connection.
+
+### Pillar 3 — LLM-Augmented Incident Response
+
+When Grafana fires a 5xx error-rate alert, automatically pull recent error logs from Loki and summarize them with an LLM to produce a plain-English incident summary in seconds:
+
+```python
+# Flask endpoint — planned addition to Service Dashboard backend
+@app.route("/api/summarize-incident", methods=["POST"])
+def summarize_incident():
+    # 1. Pull last 50 error logs from Loki
+    logs = query_loki('{namespace="apps"} |= "error"', limit=50)
+    # 2. Get Kong 429 + 5xx counts for context
+    kong_stats = query_mimir(
+        'sum by (status) (increase(kong_http_requests_total{status=~"429|5.."}[5m]))'
+    )
+    prompt = (
+        "You are an SRE on-call. Summarize this incident in 3 bullet points, "
+        "identify the likely root cause, and suggest one immediate remediation step.\n"
+        f"Error logs (last 50):\n{logs}\n"
+        f"Kong 429/5xx last 5 min: {kong_stats}"
+    )
+    response = openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return {"summary": response.choices[0].message.content}
+```
+
+This would surface in the Service Dashboard as an **"AI Incident Summary"** button — one click produces a plain-English summary of what went wrong, drawn from Kong traffic data and application logs.
+
+### AIOps Observability Roadmap
+
+| Layer | Status | Description |
+|---|---|---|
+| **Layer 1 — Metrics + Dashboards** | ✅ Active | Kong Prometheus plugin → Alloy → Mimir → Grafana (Kong + Deployment Health dashboards) |
+| **Layer 2 — Log Anomaly Ratio** | 🔲 Planned | Loki ratio alerting (current/baseline); Grafana managed alert rule |
+| **Layer 3 — IsolationForest** | 🔲 Planned | Python IsolationForest on Loki time-series vectors for multi-dimensional pattern detection |
+| **Layer 4 — Metric Forecast** | 🔲 Planned | Prophet on Mimir 7-day history; pre-emptive alert before rate-limit ceiling hit |
+| **Layer 5 — LLM Response** | 🔲 Planned | Flask + LLM API endpoint wired into Service Dashboard for on-call incident summaries |
+| **Layer 6 — Synthetic Load AI** | 🔲 Planned | AI-generated realistic traffic simulation (flash sale spike, gradual ramp, sustained load) |
+
+### Prometheus — Status & POC Notes
+
+This project routes all metrics through **Mimir** (Prometheus-compatible remote write + PromQL query API via Alloy). A standalone Prometheus instance is not deployed, but adds specific capabilities not yet covered:
+
+- **Alertmanager** — native Prometheus alert routing to PagerDuty/Slack/OpsGenie
+- **Recording rules** — pre-compute expensive multi-series PromQL aggregations at scrape time
+- **Ad-hoc exploration** — Prometheus UI is useful for iterating on PromQL before templating into Grafana
+
+**Quick POC — standalone Prometheus in the lgtm namespace (k3d/local):**
+
+```bash
+# Transient Prometheus instance — useful for PromQL exploration or Alertmanager testing
+kubectl run prometheus-poc \
+  --image=prom/prometheus:v3.4.0 \
+  --restart=Never -n lgtm \
+  -- --web.enable-lifecycle --storage.tsdb.retention.time=2h
+
+kubectl port-forward pod/prometheus-poc 9090:9090 -n lgtm
+# Open http://localhost:9090 → Graph tab for ad-hoc PromQL
+
+# Clean up when done
+kubectl delete pod prometheus-poc -n lgtm
+```
+
+A full Prometheus + Alertmanager deployment via ArgoCD (with Kong alert rules, recording rules, and Slack/PagerDuty routing) is tracked in [Future Improvements](#future-improvements).
+
+---
+
 ## Memory Budget (t3.medium, 4 GB)
 
 | Component | Request | Limit |
@@ -581,7 +703,9 @@ Destroy when done: `terraform destroy`.
 │   │   ├── tempo/                # Tempo app.yaml + values.yaml
 │   │   ├── grafana/              # Grafana app.yaml + values.yaml
 │   │   │   └── dashboards/
-│   │   │       └── deployment-health-configmap.yaml  # Custom SRE dashboard (auto-loaded)
+│   │   │   └── dashboards/
+│   │   │       ├── deployment-health-configmap.yaml  # Deployment Health dashboard (multi-source, see Operational Gotchas #5)
+│   │   │       └── kong-traffic-configmap.yaml       # Kong Traffic & Protection dashboard
 │   │   └── alloy/                # Alloy app.yaml + values.yaml + config.alloy
 │   ├── kong/                     # Kong API Gateway (DB-less mode)
 │   │   ├── app.yaml              #   ArgoCD Application — sync-wave: 1
@@ -767,6 +891,19 @@ A custom Grafana dashboard (`k8s/observability/grafana/dashboards/deployment-hea
 
 The Grafana sidecar watches all namespaces for ConfigMaps labelled `grafana_dashboard: "1"`. The dashboard appears under **Dashboards → Browse → SRE Demo** within ~30 seconds of ArgoCD syncing.
 
+> **Multi-source ArgoCD pattern (commit `620ec64`):** Dashboard ConfigMaps live in `k8s/observability/grafana/dashboards/` but are **not** applied by the Grafana Helm chart itself. The `grafana` ArgoCD Application requires a third `path:` source pointing directly at that directory. Without it, the ConfigMaps exist in git but are never created as Kubernetes objects — the sidecar label-watch never discovers them. A common gotcha with mixed Helm + raw-manifest applications in ArgoCD.
+>
+> ```yaml
+> # k8s/observability/grafana/app.yaml — three sources
+> sources:
+>   - repoURL: https://grafana.github.io/helm-charts
+>     chart: grafana                                     # 1. Helm chart
+>   - repoURL: https://github.com/paee45/gitops-sre-demo.git
+>     ref: values                                        # 2. Values reference
+>   - repoURL: https://github.com/paee45/gitops-sre-demo.git
+>     path: k8s/observability/grafana/dashboards         # 3. Raw ConfigMaps ← required
+> ```
+
 ### ⭐ Deployment validation (SRE focus)
 
 Unlike typical demos that stop at "deployment succeeded", this project validates every release using:
@@ -938,6 +1075,41 @@ No. `service-a` has a built-in load generator (1–5 requests every 2 seconds). 
 **Q: For dev/staging/production promotion, do we use separate namespaces?**  
 The current setup uses a single cluster with `apps` namespace. The production-ready pattern is: `apps-dev` / `apps-staging` / `apps-production` namespaces with Kustomize overlays per environment. This is listed in Future Improvements — implementing it requires a Kustomize refactor of `k8s/apps/` but does not change the GitOps/ArgoCD plumbing.
 
+**Q: Is there a click-to-test UI for Kong JWT auth and rate limiting?**  
+Yes — the **Service Dashboard** at `http://localhost:8090` has a **JWT Generator tab** (one-click HS256 token, copy/paste ready) and a **Load Tests tab** that walks through all 3 Kong demo phases with step-by-step instructions. No `kubectl` or `curl` required for the basic demo flow.
+
+### Kong Manager & Observability
+
+Kong provides an official UI for administrative tasks, but monitoring and analytics are handled separately depending on the version in use.
+
+#### Kong Manager (Official Admin UI)
+
+Kong Manager is the graphical user interface for **Kong Gateway Enterprise**. It handles:
+
+- Configuring Services, Routes, and Upstreams
+- Managing Plugins (rate-limiting, JWT, Prometheus)
+- Consumer and credential management
+- RBAC and Workspaces
+
+> **This project uses Kong Gateway open-source** in DB-less mode via the Kubernetes Ingress Controller (KIC). All configuration lives in Git as Kubernetes CRDs (`KongPlugin`, `KongConsumer`, `KongClusterPlugin`). Kong Manager is a Kong Enterprise feature and is not available in the open-source chart — GitOps via ArgoCD is the config management layer.
+
+#### Monitoring & Analytics (Prometheus + Grafana)
+
+For real-time Kong visibility — RPS, 401/429 rates, upstream latency distributions — the standard approach is Kong's built-in Prometheus metrics endpoint combined with a Grafana dashboard. Kong does not include a built-in analytics UI in the open-source version.
+
+| Metric | Exposed at | Scraped by | Stored in | Dashboard |
+|---|---|---|---|---|
+| `kong_http_requests_total` | Kong `:8100/metrics` | Grafana Alloy | Mimir | Kong — Traffic & Protection |
+| `kong_latency_ms_bucket` | Kong `:8100/metrics` | Grafana Alloy | Mimir | Kong — Traffic & Protection |
+| `kong_bandwidth_bytes` | Kong `:8100/metrics` | Grafana Alloy | Mimir | Kong — Traffic & Protection |
+
+The `prometheus` `KongClusterPlugin` (in `k8s/kong/plugins.yaml`) enables the Kong metrics endpoint. Alloy discovers it via pod annotations and remote-writes to Mimir. Grafana queries Mimir with PromQL — full observability path with no standalone Prometheus required.
+
+**To view Kong analytics:** `http://localhost:3000` → **Dashboards → Kong — Traffic & Protection**  
+Panels: RPS by status code · 401/429 share of total traffic · upstream P95 latency · bandwidth.
+
+> **Prometheus compatibility:** Mimir is fully Prometheus API-compatible. Any tool that queries Prometheus (Alertmanager, Python scripts, recording-rule evaluators) can be pointed at `http://mimir.lgtm.svc:9009/prometheus` without code changes. See [AIOps Strategy](#aiops-strategy--ai-powered-sre) for how this enables metric forecasting from historical Kong data.
+
 ---
 
 ## Service Dashboard — Status & Monitoring UI
@@ -1010,6 +1182,97 @@ docker run -p 3000:3000 service-dashboard:latest
 
 ---
 
+## Operational Gotchas
+
+Production-discovered issues and their GitOps fixes. Useful for anyone running this stack locally with k3d or reproducing it on EC2.
+
+### 1. Mimir chart 6.0.6 — `push_grpc_method_enabled` defaults to `false`
+
+**Symptom:** `mimir-ingester-0` enters `CrashLoopBackOff`. Logs show a config parse error around the ingester gRPC settings.
+
+**Root cause:** Mimir Helm chart 6.0.6 injects `push_grpc_method_enabled: false` into the generated ConfigMap. This field is only valid when `ingest_storage.enabled: true`. Without that flag, Mimir rejects its own generated config at startup.
+
+**Fix (commit `eab332e`):**
+```yaml
+# k8s/observability/mimir/values.yaml
+mimir:
+  structuredConfig:
+    ingester:
+      push_grpc_method_enabled: true   # override chart default of false
+      ring:
+        replication_factor: 1
+```
+
+---
+
+### 2. Kong chart 2.38.0 — missing RBAC for `KongCustomEntity`
+
+**Symptom:** `kong-ingress-controller` container in `CrashLoopBackOff`. RBAC error: `kongcustomentities.configuration.konghq.com` not permitted for the `kong-kong` ServiceAccount.
+
+**Root cause:** The Kong chart's generated ClusterRole only covers CRDs shipped with the chart. Manually-added CRDs like `KongCustomEntity` are not included — the chart has no awareness of them.
+
+**Fix (commit `2311f4d`):** Supplementary ClusterRole + ClusterRoleBinding in `k8s/kong-crds/rbac-custom-entity.yaml`:
+```yaml
+rules:
+  - apiGroups: ["configuration.konghq.com"]
+    resources: ["kongcustomentities"]
+    verbs: ["get", "list", "watch"]
+```
+
+---
+
+### 3. k3d + `limit_by: ip` — rate-limit counter silently split across nodes
+
+**Symptom:** Rate limit of 60 req/min appears not to work — requests continue well beyond 60 before returning `429`.
+
+**Root cause:** k3d's klipper-lb (SNAT) routes incoming requests through one of 3 node IPs (server-0, agent-0, agent-1) at the OS level. With `limit_by: ip`, Kong creates a separate counter _per source IP_, giving each node its own 60 req/min budget. Effective rate limit = 60 × 3 nodes = **180 requests** before any single counter trips.
+
+**Fix (commit `7a888d8`):** Use `limit_by: consumer` — tracks rate limits per authenticated JWT consumer identity, a single counter regardless of which k3d node handled the request:
+```yaml
+# k8s/kong/plugins.yaml
+config:
+  minute: 60
+  limit_by: consumer   # was: ip — splits counter via k3d SNAT, effective limit becomes 180
+```
+
+---
+
+### 4. Grafana service type — `ClusterIP:80` invisible to k3d port mapping
+
+**Symptom:** `curl http://localhost:3000` → `000 Connection refused`. Grafana pod is `Running` and service exists.
+
+**Root cause:** k3d port mappings (`-p "3000:3000@loadbalancer"`) are forwarded through klipper-svclb, which only activates for `LoadBalancer` service types. A `ClusterIP` service is unreachable from the host even with a matching port declaration at cluster creation time.
+
+**Fix (commit `d5411f1`):**
+```yaml
+# k8s/observability/grafana/values.yaml
+service:
+  type: LoadBalancer
+  port: 3000
+  targetPort: 3000
+```
+
+---
+
+### 5. Grafana dashboard ConfigMaps — ArgoCD multi-source required
+
+**Symptom:** `kubectl get configmap -A -l grafana_dashboard=1` → no results. Grafana sidecar never discovers the custom dashboards.
+
+**Root cause:** The `grafana` ArgoCD Application had only two sources (Helm chart + `ref: values`). The `dashboards/` subdirectory of raw ConfigMap manifests was never synced — the files exist in git but ArgoCD never applies them as Kubernetes objects.
+
+**Fix (commit `620ec64`):** Third source in `k8s/observability/grafana/app.yaml`:
+```yaml
+sources:
+  - repoURL: https://grafana.github.io/helm-charts
+    chart: grafana
+  - repoURL: https://github.com/paee45/gitops-sre-demo.git
+    ref: values
+  - repoURL: https://github.com/paee45/gitops-sre-demo.git
+    path: k8s/observability/grafana/dashboards   # ← ConfigMaps as K8s objects
+```
+
+---
+
 ## Design Tradeoffs
 
 | Decision | Choice | Tradeoff |
@@ -1018,7 +1281,7 @@ docker run -p 3000:3000 service-dashboard:latest
 | **K3s vs full Kubernetes** | K3s | Faster bootstrap, lighter footprint; full Kubernetes API compatibility maintained |
 | **Monolithic LGTM stack** | Single-binary Loki/Mimir/Tempo | Reduced operational overhead; tradeoff: limited horizontal scalability |
 | **NodePort exposure** | NodePort 32080 (ArgoCD), 3000 (Grafana), 8000 (Kong) | Simpler than ALB/Ingress for demo; not production-grade networking |
-| **Kong DB-less mode** | All config via K8s CRDs, no Postgres | Pure GitOps; tradeoff: no Kong Manager UI, no runtime config changes |
+| **Kong DB-less mode** | All config via K8s CRDs, no Postgres | Pure GitOps; tradeoff: no Kong Manager UI (Enterprise feature), no runtime config changes. Requires supplementary RBAC for custom CRDs (see [Operational Gotchas](#operational-gotchas) #2) |
 | **CI/CD split** | GitHub Actions (CI) + Codefresh (CD) | Clear separation of concerns; CI tooling is swappable without touching promotion logic |
 
 ---
@@ -1030,6 +1293,11 @@ docker run -p 3000:3000 service-dashboard:latest
 - **Namespace-per-environment** — `apps-dev` / `apps-staging` / `apps-production` with Kustomize overlays for true environment isolation
 - **External secret management** — integration with HashiCorp Vault or AWS Secrets Manager via External Secrets Operator
 - **JWT secret rotation** — replace demo HS256 static secret with external secret management and automated rotation
+- **Prometheus + Alertmanager** — standalone Prometheus with Alertmanager, recording rules, and Slack/PagerDuty routing (see [AIOps Strategy](#aiops-strategy--ai-powered-sre) for POC notes)
+- **AIOps — Log anomaly detection** — Loki ratio alerting + Python IsolationForest model on log-pattern vectors
+- **AIOps — Metric forecasting** — Prophet model on Mimir 7-day history; pre-emptive alert when predicted RPS approaches the rate-limit ceiling
+- **AIOps — LLM incident response** — Flask + LLM API endpoint in Service Dashboard for one-click on-call incident summarization
+- **AI traffic simulation** — Python/Flask synthetic traffic generator simulating realistic patterns (flash sale spike, gradual ramp, sustained load) for Kong autoscale and rate-limit stress-testing
 
 ---
 
@@ -1072,7 +1340,8 @@ This demo focuses on **safe and observable delivery**, not just deployment autom
 | **CI/CD separation** | GitHub Actions (build+push) → Codefresh (promote) — decoupled by image tag | CI-agnostic GitOps; swap CI without touching promotion logic |
 | **ArgoCD self-mgmt** | ArgoCD manages its own Helm config via app-of-apps | No config drift after initial bootstrap |
 | **API Gateway (Kong)** | DB-less KIC with JWT auth + rate limiting — 3-phase live demo | Traffic shaping: 429 = protection, 5xx = failure. SLO preserved under attack |
-| **Platform Dashboard** | React UI showing real-time component health + quick links | Operator-friendly monitoring, no Kubernetes CLI needed |
+| **Platform Dashboard** | React UI showing real-time component health, JWT generator, Kong load-test UI | Operator-friendly; no Kubernetes CLI needed for the demo |
+| **AIOps Framework** | Three-pillar strategy: Log Anomaly Ratio alerting, Metric Forecasting (Prophet), LLM Incident Response | Converts Data Science / AI Engineering background into production SRE practices |
 | **Cost-aware** | Everything runs on a single t3.medium with resource limits | Shows awareness of real-world constraints |
 
 ### Demo walkthrough script (5 minutes)

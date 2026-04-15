@@ -67,6 +67,27 @@ persistence:
   enabled: true
   size: 10Gi
   storageClassName: local-path
+
 # Expose OTLP ports via ClusterIP service
 service:
   type: ClusterIP
+
+# Increase probe delays — metrics-generator ring takes ~60s to join in k3d
+# (single-member ring needs to fully converge before /ready returns 200)
+livenessProbe:
+  httpGet:
+    path: /ready
+    port: 3200
+  initialDelaySeconds: 90
+  periodSeconds: 10
+  failureThreshold: 6
+  timeoutSeconds: 5
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 3200
+  initialDelaySeconds: 20
+  periodSeconds: 10
+  failureThreshold: 6
+  timeoutSeconds: 5

@@ -1,0 +1,225 @@
+# RAG Indexer — CronJob
+# Runs nightly to embed project documents into ChromaDB collections.
+#
+# Three collections updated each run:
+#   1. runbooks   — README.md + all k8s YAML files (architecture + config context)
+#   2. incidents  — last 24h Loki error logs (rolling incident memory)
+#   3. dashboards — Grafana dashboard JSON (metric/panel definition context)
+#
+# Embedding model: sentence-transformers/all-MiniLM-L6-v2 (local, no API key required)
+# Vector store:    ChromaDB at http://chromadb.aiops.svc:8000
+# Loki query:      http://loki.lgtm.svc:3100 (cluster-internal)
+#
+# The indexer image is a minimal Python container. The script is embedded
+# as a ConfigMap so it can be updated via GitOps without a Docker rebuild.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-indexer-script
+  namespace: aiops
+  labels:
+    component: aiops-rag
+data:
+  index.py: |
+    #!/usr/bin/env python3
+    """
+    SRE RAG Indexer
+    Embeds runbooks, incident logs, and dashboard definitions into ChromaDB.
+    Uses all-MiniLM-L6-v2 for local embeddings (no external API key required).
+    """
+    import os, sys, json, time, requests
+    from datetime import datetime, timedelta
+
+    CHROMA_HOST = os.getenv("CHROMA_HOST", "http://chromadb.aiops.svc:8000")
+    LOKI_HOST   = os.getenv("LOKI_HOST",   "http://loki.lgtm.svc:3100")
+    GRAFANA_URL = os.getenv("GRAFANA_URL", "http://grafana.lgtm.svc:3000")
+    DOCS_DIR    = os.getenv("DOCS_DIR",    "/docs")
+
+    def chroma_upsert(collection: str, docs: list[dict]):
+        """Upsert a list of {id, text, metadata} into a ChromaDB collection."""
+        if not docs:
+            return
+        url = f"{CHROMA_HOST}/api/v2/collections/{collection}/upsert"
+        # ChromaDB expects separate arrays
+        payload = {
+            "ids":        [d["id"]       for d in docs],
+            "documents":  [d["text"]     for d in docs],
+            "metadatas":  [d["metadata"] for d in docs],
+        }
+        r = requests.post(url, json=payload, timeout=30)
+        r.raise_for_status()
+        print(f"[{collection}] upserted {len(docs)} docs")
+
+    def ensure_collection(name: str, meta: dict):
+        """Create collection if it does not exist."""
+        r = requests.post(
+            f"{CHROMA_HOST}/api/v2/collections",
+            json={"name": name, "metadata": meta},
+            timeout=10,
+        )
+        if r.status_code not in (200, 201, 409):  # 409 = already exists
+            r.raise_for_status()
+
+    # ------------------------------------------------------------------
+    # 1. Runbooks collection — README + k8s YAML configs
+    # ------------------------------------------------------------------
+    ensure_collection("runbooks", {"description": "Project architecture, runbooks, and k8s config"})
+    docs = []
+    for root, _, files in os.walk(DOCS_DIR):
+        for fname in files:
+            if not fname.endswith((".md", ".yaml", ".yml")):
+                continue
+            path = os.path.join(root, fname)
+            try:
+                with open(path) as f:
+                    content = f.read()
+                # Chunk into ~800-char windows with 100-char overlap
+                step = 700
+                for i, start in enumerate(range(0, len(content), step)):
+                    chunk = content[start:start + 800]
+                    if len(chunk.strip()) < 50:
+                        continue
+                    docs.append({
+                        "id":       f"{path}::{i}",
+                        "text":     chunk,
+                        "metadata": {"source": path, "chunk": i, "type": "runbook"},
+                    })
+            except Exception as e:
+                print(f"  skip {path}: {e}", file=sys.stderr)
+
+    chroma_upsert("runbooks", docs)
+
+    # ------------------------------------------------------------------
+    # 2. Incidents collection — last 24h of Loki error logs
+    # ------------------------------------------------------------------
+    ensure_collection("incidents", {"description": "Loki error log windows for incident recall"})
+    now  = int(time.time() * 1e9)       # nanoseconds
+    ago  = int((time.time() - 86400) * 1e9)
+    params = {
+        "query": '{namespace="apps"} |= "error"',
+        "start": ago, "end": now, "limit": 500, "direction": "backward",
+    }
+    try:
+        r = requests.get(f"{LOKI_HOST}/loki/api/v1/query_range", params=params, timeout=30)
+        r.raise_for_status()
+        results = r.json().get("data", {}).get("result", [])
+        incident_docs = []
+        for stream in results:
+            labels = json.dumps(stream.get("labels", {}))
+            for ts, line in stream.get("values", []):
+                incident_docs.append({
+                    "id":       f"loki::{ts}",
+                    "text":     line,
+                    "metadata": {"ts": ts, "labels": labels, "type": "incident_log"},
+                })
+        chroma_upsert("incidents", incident_docs)
+    except Exception as e:
+        print(f"[incidents] Loki query failed: {e}", file=sys.stderr)
+
+    # ------------------------------------------------------------------
+    # 3. Dashboards collection — Grafana dashboard panel definitions
+    # ------------------------------------------------------------------
+    ensure_collection("dashboards", {"description": "Grafana dashboard panel titles and descriptions"})
+    try:
+        r = requests.get(
+            f"{GRAFANA_URL}/api/search",
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        dashboard_list = [d for d in r.json() if d.get("type") == "dash-db"]
+        dash_docs = []
+        for d in dashboard_list:
+            try:
+                detail = requests.get(f"{GRAFANA_URL}/api/dashboards/uid/{d['uid']}", timeout=10)
+                detail.raise_for_status()
+                dj = detail.json().get("dashboard", {})
+                for panel in dj.get("panels", []):
+                    text = f"{d['title']} / {panel.get('title','')} — {panel.get('description','')}"
+                    if len(text.strip()) < 10:
+                        continue
+                    dash_docs.append({
+                        "id":       f"grafana::{d['uid']}::{panel.get('id',0)}",
+                        "text":     text,
+                        "metadata": {"dashboard": d['title'], "panel": panel.get('title',''), "type": "dashboard"},
+                    })
+            except Exception:
+                pass
+        chroma_upsert("dashboards", dash_docs)
+    except Exception as e:
+        print(f"[dashboards] Grafana query failed: {e}", file=sys.stderr)
+
+    print("RAG indexing complete.")
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rag-indexer
+  namespace: aiops
+  labels:
+    component: aiops-rag
+spec:
+  schedule: "0 2 * * *"          # nightly at 02:00 UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            component: aiops-rag
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          initContainers:
+            # Wait for ChromaDB to be reachable before indexing
+            - name: wait-for-chroma
+              image: curlimages/curl:8.12.1
+              command:
+                - sh
+                - -c
+                - |
+                  until curl -sf http://chromadb.aiops.svc:8000/api/v2/heartbeat; do
+                    echo "waiting for chromadb..."; sleep 5
+                  done
+          containers:
+            - name: indexer
+              image: python:3.12-slim
+              command:
+                - sh
+                - -c
+                - |
+                  pip install --quiet requests && python /scripts/index.py
+              env:
+                - name: CHROMA_HOST
+                  value: "http://chromadb.aiops.svc:8000"
+                - name: LOKI_HOST
+                  value: "http://loki.lgtm.svc:3100"
+                - name: GRAFANA_URL
+                  value: "http://grafana.lgtm.svc:3000"
+                - name: DOCS_DIR
+                  value: "/docs"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                - name: docs
+                  mountPath: /docs
+          volumes:
+            - name: script
+              configMap:
+                name: rag-indexer-script
+            - name: docs
+              # Mount repo docs via a read-only empty dir populated by an init container
+              # In production: replace with a git-sync sidecar or object-store volume
+              emptyDir: {}

@@ -522,13 +522,14 @@ Alloy also scrapes kubelet cAdvisor on every node and forwards to Mimir.
 
 > A deep background in IBM Data Engineering, IBM AI/ML (IsolationForest, Prophet, Flask/Python), BI (Power BI, Tableau), and Azure/Kubernetes architecture maps directly to the SRE industry's shift toward AIOps. The framework below shows how those skills converts to three pillars that reduce MTTR (Mean Time To Resolution).
 
-### The Three AIOps Pillars
+### The Four AIOps Pillars
 
-| Pillar | SRE Problem Solved | Applicable Skills |
-|---|---|---|
-| **Log Anomaly Detection** | Replace static threshold alerts with ML-based baseline comparison on Loki streams | IBM AI Engineering, Python |
-| **Metric Forecasting** | Predict SLO breaches before they occur using historical Mimir/Prometheus data | IBM Data Science, Power BI, Tableau |
-| **LLM-Augmented Incident Response** | Auto-summarize incident context from Kong + application logs in plain English in seconds | IBM AI Developer, Flask |
+| Pillar | SRE Problem Solved | Applicable Skills | Status |
+|---|---|---|---|
+| **Log Anomaly Detection** | Replace static threshold alerts with ML-based baseline comparison on Loki streams | IBM AI Engineering, Python | 🔲 Planned |
+| **Metric Forecasting** | Predict SLO breaches before they occur using historical Mimir/Prometheus data | IBM Data Science, Power BI, Tableau | 🔲 Planned |
+| **LLM-Augmented Incident Response** | Auto-summarize incident context from Kong + application logs in plain English in seconds | IBM AI Developer, Flask | 🔲 Planned |
+| **RAG Runbook Retrieval** | Augment LLM answers with project-specific runbooks, past incidents, and dashboard definitions — zero API-key leakage of internal config | sentence-transformers, ChromaDB, Python | 🟡 Deployed (ChromaDB) |
 
 ### Pillar 1 — Log Anomaly Detection
 
@@ -574,7 +575,9 @@ This is the same Time Series + BI forecasting pattern used in Power BI and Table
 
 ### Pillar 3 — LLM-Augmented Incident Response
 
-When Grafana fires a 5xx error-rate alert, automatically pull recent error logs from Loki and summarize them with an LLM to produce a plain-English incident summary in seconds:
+When Grafana fires a 5xx error-rate alert, automatically pull recent error logs from Loki and summarize them with an LLM to produce a plain-English incident summary in seconds.
+
+> **See also:** Pillar 4 (RAG) feeds verified runbook context into this exact LLM prompt — preventing hallucinated "remediation steps" that reference infrastructure this project doesn't have.
 
 ```python
 # Flask endpoint — planned addition to Service Dashboard backend
@@ -601,42 +604,106 @@ def summarize_incident():
 
 This would surface in the Service Dashboard as an **"AI Incident Summary"** button — one click produces a plain-English summary of what went wrong, drawn from Kong traffic data and application logs.
 
+### Pillar 4 — RAG: Retrieval-Augmented Runbook Response
+
+A bare LLM prompt for Pillar 3 suffers one core failure: _the model has no knowledge of this project's specific configs, routes, or past incidents_. RAG solves this by retrieving relevant context from a local vector store **before** the LLM is called — grounding answers in verified project documentation.
+
+**SRE use cases:**
+- _"What does `KongHighRateLimitHit` mean and what is the runbook?"_ → retrieves from indexed README + alert rule YAML
+- _"Show me the last time service-a latency exceeded 300ms and what the logs said"_ → retrieves from indexed Loki error windows
+- _"What PromQL shows consumer-level rate-limit hits?"_ → retrieves from indexed Grafana dashboard JSON + recording rule definitions
+
+**Architecture:**
+
+```
+┌──────────────────────────┐   embed (MiniLM-L6)   ┌─────────────────────┐
+│  Document Corpus         │ ──────────────────────► │  ChromaDB           │
+│  • README.md             │                         │  namespace: aiops   │
+│  • k8s/**/*.yaml         │                         │                     │
+│  • Loki 24h error logs   │                         │  collections:       │
+│  • Grafana dashboard JSON│                         │  ├─ runbooks        │
+└──────────────────────────┘                         │  ├─ incidents       │
+                                                     │  └─ dashboards      │
+         LLM alert query ────── retrieve top-K ──────┤                     │
+              │                                      └─────────────────────┘
+              ▼
+     augmented prompt → LLM → incident summary with runbook context
+```
+
+**Deployment in this stack:**
+- **Vector store:** ChromaDB `chromadb/chroma:0.6.3` — running in `aiops` namespace, 2 Gi persistent volume, ArgoCD-managed via `k8s/aiops/chromadb/`
+- **Embedding model:** `sentence-transformers/all-MiniLM-L6-v2` — local inference, no external API key required for indexing
+- **Indexer:** CronJob (`rag-indexer`, nightly at 02:00 UTC) — reads `/docs` mount, chunks documents at ~800 chars, upserts into ChromaDB via HTTP API; also scrapes last 24 h of Loki error logs and all Grafana dashboard panel definitions
+- **Retrieval:** standard ChromaDB `/api/v2/collections/{name}/query` — top-5 nearest neighbours injected into the Pillar 3 LLM prompt before the API call
+
+**Verify ChromaDB is running:**
+```bash
+kubectl port-forward svc/chromadb -n aiops 8001:8000
+curl http://localhost:8001/api/v2/heartbeat
+# → {"nanosecond heartbeat": <timestamp>}
+
+# List collections after the first indexer run
+curl http://localhost:8001/api/v2/collections
+# → [{"name":"runbooks",...},{"name":"incidents",...},{"name":"dashboards",...}]
+```
+
 ### AIOps Observability Roadmap
 
 | Layer | Status | Description |
 |---|---|---|
 | **Layer 1 — Metrics + Dashboards** | ✅ Active | Kong Prometheus plugin → Alloy → Mimir → Grafana (Kong + Deployment Health dashboards) |
-| **Layer 2 — Log Anomaly Ratio** | 🔲 Planned | Loki ratio alerting (current/baseline); Grafana managed alert rule |
-| **Layer 3 — IsolationForest** | 🔲 Planned | Python IsolationForest on Loki time-series vectors for multi-dimensional pattern detection |
-| **Layer 4 — Metric Forecast** | 🔲 Planned | Prophet on Mimir 7-day history; pre-emptive alert before rate-limit ceiling hit |
-| **Layer 5 — LLM Response** | 🔲 Planned | Flask + LLM API endpoint wired into Service Dashboard for on-call incident summaries |
-| **Layer 6 — Synthetic Load AI** | 🔲 Planned | AI-generated realistic traffic simulation (flash sale spike, gradual ramp, sustained load) |
+| **Layer 2 — Prometheus + Alertmanager** | ✅ Deployed | Standalone Prometheus 3.11.0 in `lgtm` ns; Alertmanager with 4 Kong/SLO alert rules; 4 recording rules for Prophet queries |
+| **Layer 3 — Log Anomaly Ratio** | 🔲 Planned | Loki ratio alerting (current/baseline); Grafana managed alert rule |
+| **Layer 4 — IsolationForest** | 🔲 Planned | Python IsolationForest on Loki time-series vectors for multi-dimensional pattern detection |
+| **Layer 5 — Metric Forecast** | 🔲 Planned | Prophet on Mimir 7-day history; pre-emptive alert before rate-limit ceiling hit |
+| **Layer 6 — LLM Response** | 🔲 Planned | Flask + LLM API endpoint wired into Service Dashboard for on-call incident summaries |
+| **Layer 7 — RAG Foundation** | 🟡 Deployed | ChromaDB vector store in `aiops` ns + nightly rag-indexer CronJob (runbooks / incidents / dashboards collections) |
+| **Layer 8 — Synthetic Load AI** | 🔲 Planned | AI-generated realistic traffic simulation (flash sale spike, gradual ramp, sustained load) |
 
-### Prometheus — Status & POC Notes
+### Prometheus — Deployed (Layer 2)
 
-This project routes all metrics through **Mimir** (Prometheus-compatible remote write + PromQL query API via Alloy). A standalone Prometheus instance is not deployed, but adds specific capabilities not yet covered:
+Standalone Prometheus `v3.11.0` is deployed in the `lgtm` namespace via ArgoCD (`k8s/observability/prometheus/`). It runs **alongside** Mimir — each covering a different role:
 
-- **Alertmanager** — native Prometheus alert routing to PagerDuty/Slack/OpsGenie
-- **Recording rules** — pre-compute expensive multi-series PromQL aggregations at scrape time
-- **Ad-hoc exploration** — Prometheus UI is useful for iterating on PromQL before templating into Grafana
+| | Prometheus | Mimir |
+|---|---|---|
+| Role | Alert evaluation + recording rules | Long-term metric storage (remote-write target) |
+| Scrapes | Kong `:8100/metrics`, service-a `:8080/metrics`, service-b `:8080/metrics` | Receives from Alloy |
+| Retention | 15 days | Unlimited (object storage backend) |
+| Alert routing | Alertmanager (null receiver; Slack template ready) | — |
+| Recording rules | 4 pre-aggregated metrics for Prophet queries | — |
 
-**Quick POC — standalone Prometheus in the lgtm namespace (k3d/local):**
+**Alert rules deployed:**
 
+| Rule | Condition | Severity |
+|---|---|---|
+| `KongHighRateLimitHit` | 429 ratio > 10% of total requests (5 min) | warning |
+| `KongHighUnauthorizedRate` | 401 ratio > 20% of total requests (5 min) | warning |
+| `ServiceHighErrorRate` | 5xx error rate > 1% SLO (5 min) | critical |
+| `ServiceHighLatencyP95` | P95 latency > 300 ms (5 min) | warning |
+
+**Recording rules** (pre-aggregated for Prophet forecast queries):
+- `job:kong_http_requests_total:rate5m`
+- `job:kong_latency_ms:p95_5m`
+- `job:kong_rate_limit_ratio:5m`
+- `job:http_error_rate:rate5m`
+
+**Explore Prometheus:**
 ```bash
-# Transient Prometheus instance — useful for PromQL exploration or Alertmanager testing
+kubectl port-forward svc/prometheus-server -n lgtm 9090:80
+# http://localhost:9090 → Status > Targets (verify Kong + services)
+# http://localhost:9090 → Alerts (4 rules in inactive/pending state)
+# http://localhost:9090 → Graph → query: job:kong_rate_limit_ratio:5m
+```
+
+**Ad-hoc POC (transient, no ArgoCD):**
+```bash
 kubectl run prometheus-poc \
   --image=prom/prometheus:v3.4.0 \
   --restart=Never -n lgtm \
   -- --web.enable-lifecycle --storage.tsdb.retention.time=2h
-
 kubectl port-forward pod/prometheus-poc 9090:9090 -n lgtm
-# Open http://localhost:9090 → Graph tab for ad-hoc PromQL
-
-# Clean up when done
-kubectl delete pod prometheus-poc -n lgtm
+kubectl delete pod prometheus-poc -n lgtm   # clean up
 ```
-
-A full Prometheus + Alertmanager deployment via ArgoCD (with Kong alert rules, recording rules, and Slack/PagerDuty routing) is tracked in [Future Improvements](#future-improvements).
 
 ---
 
@@ -654,7 +721,9 @@ A full Prometheus + Alertmanager deployment via ArgoCD (with Kong alert rules, r
 | service-a + service-b | ~64 MB | ~128 MB |
 | Kong (proxy + KIC) | ~256 MB | ~512 MB |
 | Service Dashboard (Node.js + React) | ~128 MB | ~256 MB |
-| **Total requests** | **~2.3 GB** | **~3.6 GB** |
+| Prometheus + Alertmanager | ~256 MB | ~512 MB |
+| ChromaDB (RAG vector store) | ~256 MB | ~512 MB |
+| **Total requests** | **~2.8 GB** | **~4.6 GB** |
 
 A 3 GB swapfile (`vm.swappiness=30`) provides headroom during cold starts. If you hit OOM during a live demo, upgrade with:
 
@@ -1293,11 +1362,12 @@ sources:
 - **Namespace-per-environment** — `apps-dev` / `apps-staging` / `apps-production` with Kustomize overlays for true environment isolation
 - **External secret management** — integration with HashiCorp Vault or AWS Secrets Manager via External Secrets Operator
 - **JWT secret rotation** — replace demo HS256 static secret with external secret management and automated rotation
-- **Prometheus + Alertmanager** — standalone Prometheus with Alertmanager, recording rules, and Slack/PagerDuty routing (see [AIOps Strategy](#aiops-strategy--ai-powered-sre) for POC notes)
-- **AIOps — Log anomaly detection** — Loki ratio alerting + Python IsolationForest model on log-pattern vectors
-- **AIOps — Metric forecasting** — Prophet model on Mimir 7-day history; pre-emptive alert when predicted RPS approaches the rate-limit ceiling
-- **AIOps — LLM incident response** — Flask + LLM API endpoint in Service Dashboard for one-click on-call incident summarization
-- **AI traffic simulation** — Python/Flask synthetic traffic generator simulating realistic patterns (flash sale spike, gradual ramp, sustained load) for Kong autoscale and rate-limit stress-testing
+- **AIOps — Log anomaly detection** — Loki ratio alerting + Python IsolationForest model on log-pattern vectors (Layer 3)
+- **AIOps — Metric forecasting** — Prophet model on Mimir 7-day history + Prometheus recording rules; pre-emptive alert before rate-limit ceiling hit (Layer 5)
+- **AIOps — LLM incident response** — Flask + LLM API endpoint in Service Dashboard for one-click on-call incident summarization (Layer 6); RAG context injection from ChromaDB (Layer 7 already deployed)
+- **RAG indexer git-sync** — replace `emptyDir` in `rag-indexer` CronJob with a [git-sync](https://github.com/kubernetes/git-sync) sidecar so the document corpus reflects the live HEAD without a manual re-trigger
+- **AI traffic simulation** — Python/Flask synthetic traffic generator simulating realistic patterns (flash sale spike, gradual ramp, sustained load) for Kong autoscale and rate-limit stress-testing (Layer 8)
+- **Slack/PagerDuty alert routing** — wire Prometheus Alertmanager null receiver to a real Slack webhook or OpsGenie integration key via Kubernetes Secret
 
 ---
 

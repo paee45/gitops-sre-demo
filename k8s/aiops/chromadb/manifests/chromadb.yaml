@@ -1,0 +1,112 @@
+# ChromaDB — persistent vector store for SRE RAG pipeline
+# Image: chromadb/chroma:0.6.3
+# Role: Stores embeddings of runbooks, README, past incident summaries,
+#       and Loki log excerpts for retrieval-augmented LLM incident response.
+#
+# Access: http://chromadb.aiops.svc:8000  (cluster-internal)
+# Local:  kubectl port-forward svc/chromadb -n aiops 8001:8000
+#         curl http://localhost:8001/api/v2/heartbeat
+#
+# Collections provisioned by the rag-indexer CronJob:
+#   - runbooks   : README + k8s YAML configs (re-indexed nightly)
+#   - incidents  : Loki error-log windows (sliding 7d window)
+#   - dashboards : Grafana dashboard JSON definitions (for "what does this metric mean?")
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chromadb-data
+  namespace: aiops
+  labels:
+    app: chromadb
+    component: aiops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chromadb
+  namespace: aiops
+  labels:
+    app: chromadb
+    component: aiops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chromadb
+  template:
+    metadata:
+      labels:
+        app: chromadb
+        component: aiops
+      annotations:
+        prometheus.io/scrape: "false"   # ChromaDB does not expose Prometheus metrics
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: chromadb
+          image: chromadb/chroma:0.6.3
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: IS_PERSISTENT
+              value: "TRUE"
+            - name: PERSIST_DIRECTORY
+              value: /chroma/data
+            - name: ANONYMIZED_TELEMETRY
+              value: "FALSE"
+            - name: CHROMA_SERVER_HOST
+              value: "0.0.0.0"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /chroma/data
+          livenessProbe:
+            httpGet:
+              path: /api/v2/heartbeat
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /api/v2/heartbeat
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: chromadb-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chromadb
+  namespace: aiops
+  labels:
+    app: chromadb
+    component: aiops
+spec:
+  selector:
+    app: chromadb
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP

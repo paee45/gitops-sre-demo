@@ -1,0 +1,195 @@
+# Prometheus — standalone scrape + Alertmanager
+# Chart: prometheus-community/prometheus 28.16.0 (app v3.11.0)
+#
+# Role in this stack:
+#   - Dedicated scrape store (15d retention) alongside Mimir remote_write
+#   - Alertmanager: receives Kong 429-rate and error-rate alerts
+#   - Recording rules: pre-aggregate PromQL for AIOps metric-forecast queries
+#   - Prometheus UI on lgtm:9090 for ad-hoc PromQL exploration
+#   - Foundation for future IsolationForest / Prophet AIOps pipelines
+#
+# Memory budget: ~256 MB request / ~512 MB limit (fits in t3.medium remaining budget)
+
+server:
+  replicaCount: 1
+
+  retention: "15d"
+
+  # Expose via ClusterIP — accessed by:
+  #   kubectl port-forward svc/prometheus-server -n lgtm 9090:80
+  #   or from within cluster at http://prometheus-server.lgtm.svc:80
+  service:
+    type: ClusterIP
+    servicePort: 80
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  persistentVolume:
+    enabled: true
+    size: 4Gi
+
+  # Let Prometheus discover pods by annotation in all namespaces
+  global:
+    scrape_interval: 15s
+    evaluation_interval: 15s
+
+  # Additional scrape configs — Kong metrics endpoint on non-standard port
+  extraScrapeConfigs: |
+    - job_name: 'kong'
+      static_configs:
+        - targets: ['kong-kong-proxy.kong.svc:8100']
+      metrics_path: /metrics
+
+    - job_name: 'service-a'
+      static_configs:
+        - targets: ['service-a.apps.svc:8080']
+      metrics_path: /metrics
+
+    - job_name: 'service-b'
+      static_configs:
+        - targets: ['service-b.apps.svc:8080']
+      metrics_path: /metrics
+
+  # Alerting rules — Layer 2 AIOps (Log Anomaly & Kong protection)
+  alertingRules:
+    groups:
+      - name: kong-protection
+        rules:
+          - alert: KongHighRateLimitHit
+            expr: >
+              sum(rate(kong_http_requests_total{status="429"}[5m])) /
+              clamp_min(sum(rate(kong_http_requests_total[5m])), 0.001) > 0.10
+            for: 2m
+            labels:
+              severity: warning
+              layer: aiops-layer2
+            annotations:
+              summary: "Kong rate-limit hit rate > 10% for 2 min"
+              description: "More than 10% of Kong requests are returning 429 Too Many Requests. Possible traffic spike or consumer abuse."
+
+          - alert: KongHighUnauthorizedRate
+            expr: >
+              sum(rate(kong_http_requests_total{status="401"}[5m])) /
+              clamp_min(sum(rate(kong_http_requests_total[5m])), 0.001) > 0.20
+            for: 2m
+            labels:
+              severity: warning
+              layer: aiops-layer2
+            annotations:
+              summary: "Kong 401 Unauthorized rate > 20%"
+              description: "Over 20% of Kong requests lack valid JWT credentials. Possible credential abuse or misconfigured client."
+
+      - name: service-slo
+        rules:
+          - alert: ServiceHighErrorRate
+            expr: >
+              sum(rate(http_requests_total{status=~"5.."}[5m])) by (service_name) /
+              clamp_min(sum(rate(http_requests_total[5m])) by (service_name), 0.001) > 0.01
+            for: 5m
+            labels:
+              severity: critical
+              layer: aiops-layer2
+            annotations:
+              summary: "Service {{ $labels.service_name }} error rate > 1% SLO"
+              description: "HTTP 5xx error rate has exceeded the 1% SLO threshold for 5 minutes."
+
+          - alert: ServiceHighLatencyP95
+            expr: >
+              histogram_quantile(0.95,
+                sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service_name)
+              ) > 0.3
+            for: 5m
+            labels:
+              severity: warning
+              layer: aiops-layer2
+            annotations:
+              summary: "Service {{ $labels.service_name }} P95 latency > 300ms SLO"
+              description: "P95 latency has exceeded the 300ms SLO threshold for 5 minutes."
+
+  # Recording rules — pre-aggregate for Prophet/AIOps forecast queries
+  recordingRules:
+    groups:
+      - name: kong-aggregates
+        interval: 1m
+        rules:
+          - record: job:kong_http_requests_total:rate5m
+            expr: sum(rate(kong_http_requests_total[5m])) by (status)
+
+          - record: job:kong_latency_ms:p95_5m
+            expr: >
+              histogram_quantile(0.95,
+                sum(rate(kong_latency_ms_bucket[5m])) by (le, type))
+
+          - record: job:kong_rate_limit_ratio:5m
+            expr: >
+              sum(rate(kong_http_requests_total{status="429"}[5m])) /
+              clamp_min(sum(rate(kong_http_requests_total[5m])), 0.001)
+
+      - name: service-aggregates
+        interval: 1m
+        rules:
+          - record: job:http_error_rate:rate5m
+            expr: >
+              sum(rate(http_requests_total{status=~"5.."}[5m])) by (service_name) /
+              clamp_min(sum(rate(http_requests_total[5m])) by (service_name), 0.001)
+
+# Alertmanager — receives alert firings from the rules above
+alertmanager:
+  enabled: true
+  replicaCount: 1
+
+  service:
+    type: ClusterIP
+    servicePort: 80
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+  persistentVolume:
+    enabled: false
+
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ["alertname", "severity"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: "null"     # default: swallow alerts (configure Slack/PagerDuty here for production)
+      routes:
+        - matchers:
+            - alertname =~ "Kong.*|Service.*"
+          receiver: "null"
+    receivers:
+      - name: "null"
+      # Uncomment + configure for production Slack alerting:
+      # - name: "slack"
+      #   slack_configs:
+      #     - api_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+      #       channel: "#sre-alerts"
+      #       title: '{{ template "slack.default.title" . }}'
+      #       text: '{{ template "slack.default.text" . }}'
+
+# Disable components already covered by Alloy + Mimir
+pushgateway:
+  enabled: false
+
+# kube-state-metrics: useful for pod/deployment state metrics (enable if needed)
+kube-state-metrics:
+  enabled: false
+
+# Node exporter: Alloy already collects node metrics via cAdvisor
+prometheus-node-exporter:
+  enabled: false

@@ -55,7 +55,7 @@ GitHub Push
 | Metrics | Grafana Mimir | monolithic mode, 7d retention |
 | Logs | Grafana Loki | SingleBinary, 7d retention |
 | Traces | Grafana Tempo | OTLP gRPC+HTTP, 7d retention |
-| Dashboards | Grafana 12 | 7 pre-wired dashboards |
+| Dashboards | Grafana 12 | 10 dashboards (7 community + 3 custom GitOps ConfigMaps) |
 | Collector | Grafana Alloy | DaemonSet, River config |
 | Services | service-a (HTTP) | orders API, Prometheus + OTLP |
 | Services | service-b (worker) | background jobs, Prometheus + OTLP |
@@ -460,7 +460,7 @@ ssh -i /tmp/k3s.pem admin@<public-ip>
 
 - URL: `http://<public-ip>:3000`
 - Login: anonymous Viewer access (no credentials needed for demo)
-- All 7 dashboards are auto-provisioned under **Dashboards → Browse**
+- All 10 dashboards are auto-provisioned under **Dashboards → Browse**
 
 ### ArgoCD
 
@@ -488,8 +488,9 @@ ssh admin@<ip> 'kubectl -n argocd get secret argocd-initial-admin-secret \
 | Tempo / Distributed Tracing | 19689 | Trace search + latency heatmap |
 | **Deployment Health** (custom) | — | Deploy frequency · SLO gauges · Error rate · Latency P95 · Pod restarts |
 | **Kong — Traffic & Protection** (custom) | — | RPS · 401/429/5xx rates · upstream latency P95 · SLO gauges vs service-a |
+| **Tempo — Distributed Traces** (custom) | — | Span rate · error rate · P99 per service (from metrics generator) · Service Map topology · Recent Traces with flame-graph drill-down |
 
-Trace-to-logs and trace-to-metrics correlation is configured. Click a trace span in Tempo to jump directly to the correlated Loki log stream.
+Trace-to-logs and trace-to-metrics correlation is configured. Click a trace span in Tempo to jump directly to the correlated Loki log stream. Click any traceID in Loki logs to jump to the full flame graph in Tempo.
 
 ---
 
@@ -515,6 +516,59 @@ service-a / service-b
 ```
 
 Alloy also scrapes kubelet cAdvisor on every node and forwards to Mimir.
+
+---
+
+## Distributed Tracing
+
+### Trace pipeline
+
+```
+service-a / service-b
+    │  OTLP HTTP (host:port — no scheme)
+    ▼
+Alloy  otelcol.receiver.otlp.default  (pod port 4318)
+    │  OTLP gRPC
+    ▼
+Tempo  (stores spans, 7d retention)
+    │  metrics generator
+    ▼
+Mimir  traces_spanmetrics_* + traces_service_graph_*
+    │
+    ▼
+Grafana  "Tempo — Distributed Traces" dashboard
+```
+
+### Instrumentation
+
+Both services use the Go OTEL SDK:
+- `otelhttp.NewHandler()` middleware creates one span per HTTP request automatically
+- `sdktrace.AlwaysSampler()` — 100% sampling (appropriate for a demo)
+- Every `slog` log line includes `traceID` + `spanID` fields
+- Loki derived field on `traceID` → one click from a log line to the full flame graph in Tempo
+- Grafana Tempo datasource has `tracesToLogsV2` and `tracesToMetrics` wired → bidirectional correlation
+
+### Verifying traces
+
+```bash
+# Port-forward Tempo and query the search API
+KUBECONFIG=~/.kube/ai-sandbox/config kubectl port-forward svc/tempo -n lgtm 3200:3200 &
+curl -s 'http://localhost:3200/api/search?limit=5' | jq '.traces[] | {service: .rootServiceName, trace: .traceID}'
+# → {"service":"service-a","trace":"68a1e4e9..."}
+# → {"service":"service-b","trace":"..."}
+```
+
+### Dashboard
+
+**Grafana → SRE Demo → "Tempo — Distributed Traces"**
+
+| Panel | Source | What it shows |
+|---|---|---|
+| Span Rate | `traces_spanmetrics_calls_total` in Mimir | Requests/sec per service |
+| Error Rate | `traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}` | % of erroring spans |
+| P99 Duration | `traces_spanmetrics_duration_milliseconds_bucket` | 99th-percentile latency per service |
+| Service Map | Tempo nodeGraph / serviceMap | Topology of inter-service calls |
+| Recent Traces | Tempo nativeSearch | Click any TraceID → flame graph drill-down |
 
 ---
 
@@ -772,9 +826,9 @@ Destroy when done: `terraform destroy`.
 │   │   ├── tempo/                # Tempo app.yaml + values.yaml
 │   │   ├── grafana/              # Grafana app.yaml + values.yaml
 │   │   │   └── dashboards/
-│   │   │   └── dashboards/
 │   │   │       ├── deployment-health-configmap.yaml  # Deployment Health dashboard (multi-source, see Operational Gotchas #5)
-│   │   │       └── kong-traffic-configmap.yaml       # Kong Traffic & Protection dashboard
+│   │   │       ├── kong-traffic-configmap.yaml       # Kong Traffic & Protection dashboard
+│   │   │       └── tempo-traces-configmap.yaml       # Tempo — Distributed Traces dashboard
 │   │   └── alloy/                # Alloy app.yaml + values.yaml + config.alloy
 │   ├── kong/                     # Kong API Gateway (DB-less mode)
 │   │   ├── app.yaml              #   ArgoCD Application — sync-wave: 1
@@ -1319,6 +1373,25 @@ service:
   type: LoadBalancer
   port: 3000
   targetPort: 3000
+```
+
+---
+
+### 6. OTLP exporter endpoint — `host:port` only, no URL scheme
+
+**Symptom:** All traces silently dropped. Service logs show:
+```
+traces export: parse "http://http:%2F%2Falloy.lgtm.svc.cluster.local:4318/v1/traces": invalid URL escape "%2F"
+```
+
+**Root cause:** `otlptracehttp.WithEndpoint()` takes **`host:port` only** — not a full URL. When `OTEL_EXPORTER_OTLP_ENDPOINT` contains the `http://` scheme prefix, the SDK constructs `http://http://host:port/v1/traces`, producing a double-scheme URL that fails to parse. Traces are dropped with no retry.
+
+**Fix (commit `8c4326a`):**
+```yaml
+# k8s/apps/service-a/deployment.yaml  (same for service-b)
+env:
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "alloy.lgtm.svc.cluster.local:4318"   # host:port — NO http:// prefix
 ```
 
 ---

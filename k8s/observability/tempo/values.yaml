@@ -37,14 +37,37 @@ tempo:
     - name: GOMEMLIMIT
       value: "345MiB"
 
+  # Metrics generator — produces traces_spanmetrics_* and service-graph metrics
+  # pushed to Mimir.  Powers the Service Map and RED panels in Grafana.
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: "http://mimir-mimir-distributed-distributor.lgtm.svc:8080/api/v1/push"
+    storage:
+      path: "/var/tempo/metrics"
+      remote_write: []   # uses remoteWriteUrl above
+    processor:
+      service_graphs:
+        wait: 10s
+        max_items: 10000
+      span_metrics:
+        enable_target_info: true
+    registry:
+      collection_interval: 15s
+      external_labels:
+        cluster: k3s-demo
+
+  # Enable processors for all tenants (single-tenant demo)
+  overrides:
+    defaults:
+      metrics_generator:
+        processors:
+          - service-graphs
+          - span-metrics
+
 persistence:
   enabled: true
   size: 10Gi
   storageClassName: local-path
-
-serviceMonitor:
-  enabled: false
-
 # Expose OTLP ports via ClusterIP service
 service:
   type: ClusterIP

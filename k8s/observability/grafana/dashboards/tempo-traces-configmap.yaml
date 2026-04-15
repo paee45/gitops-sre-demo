@@ -1,0 +1,216 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-tempo-traces
+  namespace: lgtm
+  labels:
+    grafana_dashboard: "1"
+data:
+  tempo-traces.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "description": "End-to-end distributed tracing — service-a & service-b. Pipeline: OTLP/HTTP → Alloy → Tempo. Panels: service map, RED metrics (via Tempo metrics generator), trace search with flame graph drill-down.",
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "gridPos": {"h": 3, "w": 24, "x": 0, "y": 0},
+          "id": 1,
+          "options": {
+            "content": "## Distributed Tracing — service-a & service-b\n**Trace pipeline:** `service-a/b` → *(OTLP HTTP :4318)* → `alloy` → *(OTLP gRPC :4317)* → `tempo`\n\nAll HTTP handlers use `otelhttp` middleware with `AlwaysSample()`. Every log line includes `traceID` for log↔trace correlation via Loki derived fields. **Click any TraceID** in the table below to open the full flame graph.",
+            "mode": "markdown"
+          },
+          "title": "",
+          "transparent": true,
+          "type": "text"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "description": "Request throughput per service derived from span metrics (requires Tempo metrics generator).",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "noValue": "N/A — enable metrics generator",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 20},
+                  {"color": "red", "value": 50}
+                ]
+              },
+              "unit": "reqps"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 3},
+          "id": 2,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "mimir"},
+              "expr": "sum by (service) (rate(traces_spanmetrics_calls_total{cluster=\"k3s-demo\"}[5m]))",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Span Rate (req/s)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "description": "Percentage of spans with ERROR status per service.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "decimals": 1,
+              "mappings": [],
+              "noValue": "N/A — enable metrics generator",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 2},
+                  {"color": "red", "value": 5}
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 8, "x": 8, "y": 3},
+          "id": 3,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "mimir"},
+              "expr": "100 * sum by (service) (rate(traces_spanmetrics_calls_total{cluster=\"k3s-demo\",status_code=\"STATUS_CODE_ERROR\"}[5m])) / sum by (service) (rate(traces_spanmetrics_calls_total{cluster=\"k3s-demo\"}[5m]))",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Error Rate (%)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "mimir"},
+          "description": "P99 span duration in milliseconds per service.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "noValue": "N/A — enable metrics generator",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 500},
+                  {"color": "red", "value": 1000}
+                ]
+              },
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 3},
+          "id": 4,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "mimir"},
+              "expr": "histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_duration_milliseconds_bucket{cluster=\"k3s-demo\"}[5m])))",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ],
+          "title": "P99 Duration (ms)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "tempo", "uid": "tempo"},
+          "description": "Service dependency graph built from trace spans. Node size reflects request rate; red edges indicate errors. Requires Tempo metrics_generator with service-graphs processor.",
+          "fieldConfig": {"defaults": {}, "overrides": []},
+          "gridPos": {"h": 14, "w": 12, "x": 0, "y": 7},
+          "id": 5,
+          "options": {
+            "nodes": {"mainStatUnit": "ms"},
+            "edges": {}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "tempo", "uid": "tempo"},
+              "queryType": "serviceMap",
+              "refId": "A"
+            }
+          ],
+          "title": "Service Map",
+          "type": "nodeGraph"
+        },
+        {
+          "datasource": {"type": "tempo", "uid": "tempo"},
+          "description": "Recent traces across all services. Click a TraceID to open the flame graph and inspect individual spans, attributes, and log correlation.",
+          "fieldConfig": {"defaults": {}, "overrides": []},
+          "gridPos": {"h": 14, "w": 12, "x": 12, "y": 7},
+          "id": 6,
+          "options": {},
+          "targets": [
+            {
+              "datasource": {"type": "tempo", "uid": "tempo"},
+              "filters": [],
+              "limit": 20,
+              "queryType": "nativeSearch",
+              "refId": "A",
+              "tableType": "traces"
+            }
+          ],
+          "title": "Recent Traces",
+          "type": "traces"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["tempo", "tracing", "otel", "sre-demo"],
+      "time": {"from": "now-1h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Tempo — Distributed Traces",
+      "uid": "tempo-tracing-sre",
+      "version": 1
+    }

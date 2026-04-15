@@ -301,18 +301,9 @@ alloy:
       cpu: 200m
       memory: 256Mi
 
-serviceAccount:
-  create: true
-  name: alloy
-
-# ClusterRole to read pods, nodes, endpoints, namespaces
-rbac:
-  create: true
-
-# Expose OTLP endpoints for the Go services to send traces to
-service:
-  type: ClusterIP
-  ports:
+  # Expose OTLP gRPC + HTTP on the Alloy ClusterIP service so Go services can reach it.
+  # Without this, alloy.lgtm.svc:4318 has no mapped port and connections are refused.
+  extraPorts:
     - name: otlp-grpc
       port: 4317
       targetPort: 4317
@@ -321,6 +312,14 @@ service:
       port: 4318
       targetPort: 4318
       protocol: TCP
+
+serviceAccount:
+  create: true
+  name: alloy
+
+# ClusterRole to read pods, nodes, endpoints, namespaces
+rbac:
+  create: true
 
 serviceMonitor:
   enabled: false

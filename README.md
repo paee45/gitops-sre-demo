@@ -1252,11 +1252,19 @@ A **React + Node.js web app** that provides real-time visibility into platform c
 
 ### Accessing the Dashboard
 
+**On EC2 (production):**
 ```bash
-# URL
 http://<public-ip>:8090
+```
 
-# Default token (change in production)
+**Local k3d:** The service is `ClusterIP:3000` — use port-forward:
+```bash
+KUBECONFIG=~/.kube/ai-sandbox/config kubectl port-forward svc/service-dashboard -n apps 8090:3000
+# then open http://localhost:8090
+```
+
+**Default token:**
+```
 gitops-sre-demo-token-changeme
 ```
 
@@ -1264,7 +1272,7 @@ gitops-sre-demo-token-changeme
 
 Deployed via ArgoCD at `k8s/apps/service-dashboard/`:
 - **Image:** `ghcr.io/paee45/service-dashboard:latest` (built from `src/service-dashboard/`)
-- **Port:** 8090 (NodePort)
+- **Port:** 3000 (ClusterIP); exposed as 8090 on EC2 via NodePort or port-forward locally
 - **Replicas:** 1
 - **Auth:** RBAC ClusterRole for reading pod/deployment status across all namespaces
 - **Token:** Stored in `dashboard-secret` in the `apps` namespace
@@ -1357,6 +1365,21 @@ config:
   minute: 60
   limit_by: consumer   # was: ip — splits counter via k3d SNAT, effective limit becomes 180
 ```
+
+---
+
+### 7. Service Dashboard — `ClusterIP` not reachable via k3d port mapping
+
+**Symptom:** `curl http://localhost:8090` → `000 Connection refused`. Pod is `Running`, k3d cluster was created with `-p "8090:8090@loadbalancer"`.
+
+**Root cause:** k3d's klipper-svclb only activates for `LoadBalancer`-type services. `service-dashboard` is `ClusterIP:3000` — the `8090` port mapping has nothing to forward to.
+
+**Fix (local k3d):**
+```bash
+KUBECONFIG=~/.kube/ai-sandbox/config kubectl port-forward svc/service-dashboard -n apps 8090:3000
+```
+
+**On EC2:** The service is fronted by a NodePort (`8090`) exposed in the security group — accessible directly at `http://<public-ip>:8090`.
 
 ---
 
@@ -1462,10 +1485,19 @@ This demo focuses on **safe and observable delivery**, not just deployment autom
 
 | | |
 |---|---|
-| **Grafana** | `http://<PUBLIC_IP>:3000` (anonymous viewer, no login) |
-| **ArgoCD** | `http://<PUBLIC_IP>:32080` (admin / see SSH retrieval above) |
-| **Kong Proxy** | `http://<PUBLIC_IP>:8000` (JWT required for /api/orders) |
-| **Service Dashboard** | `http://<PUBLIC_IP>:8090` (token: `gitops-sre-demo-token-changeme`) |
+| **Grafana** | `http://<PUBLIC_IP>:3000` — user: `admin` / pass: see below; also anonymous viewer |
+| **ArgoCD** | `http://<PUBLIC_IP>:32080` — user: `admin` / pass: see SSH retrieval above |
+| **Kong Proxy** | `http://<PUBLIC_IP>:8000` — JWT required for `/api/orders`; 404 at `/` is expected |
+| **Service Dashboard** | `http://<PUBLIC_IP>:8090` — token: `gitops-sre-demo-token-changeme` |
+
+**Retrieve credentials:**
+```bash
+# ArgoCD admin password
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+
+# Grafana admin password
+kubectl -n lgtm get secret grafana -o jsonpath="{.data.admin-password}" | base64 -d
+```
 | **Public IP** | Set after `terraform apply` — run `terraform -chdir=terraform output instance_public_ip` |
 
 > **Note:** The EC2 instance is stopped when not actively demoing to reduce cost (~$33/mo running).  

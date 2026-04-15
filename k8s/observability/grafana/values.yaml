@@ -55,7 +55,7 @@ datasources:
       - name: Mimir
         uid: mimir
         type: prometheus
-        url: http://mimir-mimir-distributed-query-frontend.lgtm.svc:8080/prometheus
+        url: http://mimir-query-frontend.lgtm.svc:8080/prometheus
         access: proxy
         isDefault: true
         jsonData:
@@ -79,7 +79,7 @@ datasources:
       - name: Tempo
         uid: tempo
         type: tempo
-        url: http://tempo.lgtm.svc:3100
+        url: http://tempo.lgtm.svc:3200
         access: proxy
         jsonData:
           tracesToLogsV2:

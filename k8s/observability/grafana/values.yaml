@@ -26,6 +26,11 @@ persistence:
   size: 2Gi
   storageClassName: local-path
 
+# Disable init container that chowns /var/lib/grafana — fails on k3d local-path PVCs
+# where the volume is already owned by root and the init runs as non-root
+initChownData:
+  enabled: false
+
 # Grafana UI settings
 grafana.ini:
   server:

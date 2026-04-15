@@ -48,9 +48,10 @@ spec:
       annotations:
         prometheus.io/scrape: "false"   # ChromaDB does not expose Prometheus metrics
     spec:
+      # chromadb/chroma image runs as its own internal user; specifying
+      # runAsNonRoot breaks uvicorn's file-logging handler. fsGroup ensures
+      # the mounted PVC is writable by the container's default runtime user.
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
         fsGroup: 1000
       containers:
         - name: chromadb

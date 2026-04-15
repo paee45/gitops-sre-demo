@@ -17,8 +17,8 @@ resources:
 
 # Expose via ClusterIP (access via kubectl port-forward for local dev)
 service:
-  type: ClusterIP
-  port: 80
+  type: LoadBalancer
+  port: 3000
   targetPort: 3000
 
 persistence:

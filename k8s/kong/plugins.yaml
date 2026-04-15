@@ -23,7 +23,9 @@ config:
   upstream_health_metrics: true
 ---
 # ---------------------------------------------------------------------------
-# Rate limiting — 60 requests/minute per IP, local counters (no Redis needed)
+# Rate limiting — 60 requests/minute per consumer, local counters (no Redis needed)
+# limit_by: consumer tracks the authenticated JWT identity (not source IP)
+# which avoids k3d SNAT splitting the counter across 3 node IPs.
 # Returns 429 when exceeded — signals protection, not failure
 # ---------------------------------------------------------------------------
 apiVersion: configuration.konghq.com/v1
@@ -37,7 +39,7 @@ plugin: rate-limiting
 config:
   minute: 60
   policy: local
-  limit_by: ip
+  limit_by: consumer
   error_code: 429
   error_message: "Rate limit exceeded — slow down."
   hide_client_headers: false   # Show RateLimit-* headers in response (demo visible)

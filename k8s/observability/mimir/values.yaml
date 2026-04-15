@@ -32,7 +32,7 @@ mimir:
     store_gateway: {}
 
     ingester:
-      push_grpc_disabled: false   # chart 6.0.6 defaults to true; only valid with ingest_storage enabled
+      push_grpc_method_enabled: true   # chart 6.0.6 defaults to false; only valid when ingest_storage is enabled
       ring:
         replication_factor: 1
 

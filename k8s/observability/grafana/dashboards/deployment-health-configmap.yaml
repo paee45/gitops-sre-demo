@@ -522,7 +522,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "mimir"},
-              "expr": "histogram_quantile(0.95, sum(rate(order_duration_seconds_bucket[5m])) by (le, app))",
+              "expr": "histogram_quantile(0.95, sum(rate(order_processing_duration_seconds_bucket[5m])) by (le, app))",
               "legendFormat": "p95 — {{app}}",
               "refId": "A"
             }
@@ -704,7 +704,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "mimir"},
-              "expr": "histogram_quantile(0.95, sum(rate(order_duration_seconds_bucket[5m])) by (le)) * 1000",
+              "expr": "histogram_quantile(0.95, sum(rate(order_processing_duration_seconds_bucket[5m])) by (le)) * 1000",
               "instant": true,
               "legendFormat": "p95 ms",
               "refId": "A"

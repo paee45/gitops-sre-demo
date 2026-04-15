@@ -66,6 +66,9 @@ datasources:
         jsonData:
           timeInterval: "60s"
           httpMethod: GET
+          httpHeaderName1: "X-Scope-OrgID"
+        secureJsonData:
+          httpHeaderValue1: "anonymous"
 
       # Loki for logs
       - name: Loki

@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-sandbox
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"   # after chromadb (wave 2)
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/paee45/gitops-sre-demo.git
+    targetRevision: HEAD
+    path: k8s/aiops/ai-sandbox
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai-sandbox
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m

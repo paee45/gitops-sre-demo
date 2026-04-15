@@ -178,5 +178,5 @@ metaMonitoring:
     enabled: false
 
 # Expose query-frontend and distributor via ClusterIP
-# Alloy remote_writes to http://mimir-mimir-distributed-distributor:8080/api/v1/push
+# Alloy remote_writes to http://mimir-distributor.lgtm.svc:8080/api/v1/push
 # Grafana queries http://mimir-mimir-distributed-query-frontend:8080/prometheus

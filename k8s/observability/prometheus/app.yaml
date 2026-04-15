@@ -36,3 +36,11 @@ spec:
         duration: 10s
         factor: 2
         maxDuration: 5m
+  # Alertmanager StatefulSet reports OutOfSync due to server-side-apply
+  # managedFields ownership annotations — no actual drift in spec.
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      name: prometheus-alertmanager
+      jsonPointers:
+        - /spec/volumeClaimTemplates

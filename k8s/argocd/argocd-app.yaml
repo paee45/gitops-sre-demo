@@ -11,9 +11,13 @@ metadata:
 spec:
   project: default
 
-  # Two-source pattern:
+  # Three-source pattern:
   #   source[0]  — Helm chart from the official argo-helm registry
   #   source[1]  — values file from this Git repo (ref alias: values)
+  #   source[2]  — argocd/root-app.yaml as a raw manifest
+  #                This makes root-app.yaml auto-synced via GitOps.
+  #                After the one-time bootstrap (kubectl apply argocd-app.yaml),
+  #                any future change to root-app.yaml is picked up automatically.
   sources:
     - repoURL: https://argoproj.github.io/argo-helm
       chart: argo-cd
@@ -26,6 +30,12 @@ spec:
     - repoURL: https://github.com/paee45/gitops-sre-demo.git
       targetRevision: HEAD
       ref: values   # makes this source available as $values above
+
+    - repoURL: https://github.com/paee45/gitops-sre-demo.git
+      targetRevision: HEAD
+      path: argocd
+      directory:
+        include: "root-app.yaml"  # apply only this file, not any future files added to argocd/
 
   destination:
     server: https://kubernetes.default.svc

@@ -42,7 +42,8 @@ mimir:
           store: memberlist
 
     memberlist:
-      join_members: []
+      join_members:
+        - "dns+mimir-gossip-ring.lgtm.svc.cluster.local:7946"
 
     # Disable Kafka-based ingest storage (not needed for demo)
     ingest_storage:

@@ -37,3 +37,19 @@ spec:
         duration: 15s
         factor: 2
         maxDuration: 5m
+  # Kong chart auto-generates self-signed TLS certs for its admission webhook on
+  # every Helm render — the live cluster keeps the original cert bytes, creating
+  # permanent diff noise.  Ignore these resources to keep the app Synced.
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: kong-kong-validation-webhook-ca-keypair
+      jsonPointers: ["/data"]
+    - group: ""
+      kind: Secret
+      name: kong-kong-validation-webhook-keypair
+      jsonPointers: ["/data"]
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      name: kong-kong-validations
+      jsonPointers: ["/webhooks/0/clientConfig/caBundle", "/webhooks/1/clientConfig/caBundle"]

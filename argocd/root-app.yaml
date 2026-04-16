@@ -37,3 +37,13 @@ spec:
         duration: 5s
         factor: 2
         maxDuration: 3m
+  # ArgoCD adds runtime annotations (tracking-id, last-applied-configuration)
+  # to child Application objects after they are created.  These fields are not
+  # in git, so root-app always sees them as OutOfSync.  Ignore them.
+  ignoreDifferences:
+    - group: argoproj.io
+      kind: Application
+      jsonPointers:
+        - /metadata/annotations/argocd.argoproj.io~1tracking-id
+        - /metadata/annotations/kubectl.kubernetes.io~1last-applied-configuration
+        - /status

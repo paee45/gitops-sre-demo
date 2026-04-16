@@ -27,3 +27,11 @@ spec:
         duration: 10s
         factor: 2
         maxDuration: 5m
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      name: mimir
+      jsonPointers:
+        - /spec/volumeClaimTemplates/0/status
+        - /spec/volumeClaimTemplates/0/apiVersion
+        - /spec/volumeClaimTemplates/0/kind

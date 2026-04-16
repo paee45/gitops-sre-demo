@@ -170,6 +170,30 @@ dashboards:
       revision: 2
       datasource: Tempo
 
+    # --- Node Exporter ---
+    node-exporter-full:
+      gnetId: 1860
+      revision: 37
+      datasource: Mimir
+
+    # --- Kubernetes compute resources ---
+    k8s-compute-resources-cluster:
+      gnetId: 15757
+      revision: 37
+      datasource: Mimir
+
+    # --- Mimir overview ---
+    mimir-overview:
+      gnetId: 15736
+      revision: 7
+      datasource: Mimir
+
+    # --- Loki operational ---
+    loki-operational:
+      gnetId: 13407
+      revision: 1
+      datasource: Mimir
+
 # ---------------------------------------------------------------------------
 # Sidecar — watch ALL namespaces for ConfigMaps with grafana_dashboard=1
 # Enables adding dashboards via GitOps without redeploying Grafana

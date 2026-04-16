@@ -37,9 +37,6 @@ data:
     compactor:
       compaction_interval: 30m
       data_dir: /data/compactor
-      ring:
-        kvstore:
-          store: inmemory
 
     ruler:
       ring:

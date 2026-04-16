@@ -50,6 +50,14 @@ tempo:
         max_items: 10000
       span_metrics:
         enable_target_info: true
+      local_blocks:
+        max_live_traces: 10000
+        max_block_duration: 5m
+        max_block_bytes: 104857600  # 100 MB — conservative for t3.medium
+        flush_check_period: 10s
+        trace_idle_period: 10s
+        filter_server_spans: false
+        complete_block_timeout: 1h
     registry:
       collection_interval: 15s
       external_labels:
@@ -62,6 +70,7 @@ tempo:
         processors:
           - service-graphs
           - span-metrics
+          - local-blocks  # required for TraceQL metrics / Grafana Traces Drilldown
 
   # Increase probe delays — metrics-generator ring takes ~60s to join in k3d
   # (single-member ring needs to fully converge before /ready returns 200)

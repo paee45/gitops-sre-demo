@@ -1,6 +1,6 @@
 # 🚀 AI-Powered GitOps SRE Platform
 
-**Production-grade DevOps + SRE + AI Observability Demo**
+**DevOps + SRE + AI Observability Demo**
 
 End-to-end platform demonstrating modern cloud engineering best practices: GitOps delivery, CI/CD promotion pipelines, API governance with Kong, full LGTM observability stack, and an AI-assisted SRE layer for incident analysis.
 

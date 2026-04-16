@@ -25,23 +25,37 @@ End-to-end platform demonstrating modern cloud engineering best practices: GitOp
 ## 🧠 Architecture Overview
 
 ```
-Developer → Git Push
+Developer → PR / push to main (src/** changed)
           ↓
-GitHub Actions (CI: build + push image → GHCR)
+┌─────────────────────────────────────────────────────────────┐
+│  ci.yml  — CI gate (blocks everything below if it fails)    │
+│  ① golangci-lint  ② go test -race  ③ Trivy image scan       │
+│     (exit-code:1 on CRITICAL/HIGH CVEs → SARIF to GitHub)   │
+└─────────────────────────────────────────────────────────────┘
+          ↓  (only if ci.yml succeeded on main)
+┌─────────────────────────────────────────────────────────────┐
+│  build-images.yml  — triggered by workflow_run              │
+│  ① docker buildx → push ghcr.io/paee45/{service}:{sha}      │
+│  ② post-push Trivy warn scan                                │
+│  ③ POST Codefresh API  (IMAGE_TAG = short SHA)              │
+└─────────────────────────────────────────────────────────────┘
           ↓
-Codefresh (CD: dev → staging → production with approval gates)
+┌─────────────────────────────────────────────────────────────┐
+│  codefresh.yml  — CD promotion pipeline                     │
+│  dev      → auto-promote (commits k8s/envs/dev.env)         │
+│  staging  → pending-approval (48h timeout) → commit         │
+│  prod     → pending-approval (72h timeout) → patch          │
+│             k8s/apps/*/deployment.yaml + signed git tag      │
+└─────────────────────────────────────────────────────────────┘
+          ↓  (ArgoCD polls git every ~3 min, selfHeal=true)
+┌─────────────────────────────────────────────────────────────┐
+│  ArgoCD App-of-Apps  — auto-sync on k3d / EC2               │
+│  Kong (JWT auth + rate limiting)                            │
+│  service-a / service-b / service-dashboard                  │
+│  Grafana Alloy → Mimir · Loki · Tempo  (LGTM stack)         │
+└─────────────────────────────────────────────────────────────┘
           ↓
-GitOps Repo (k8s/ manifests updated via image tag commit)
-          ↓
-ArgoCD (App of Apps → auto-sync on K3s / AWS EC2)
-          ↓
-Kong (API Gateway: JWT auth + rate limiting)
-          ↓
-Application Services (service-a, service-b — Go; service-dashboard — React+Node)
-          ↓
-Observability: Grafana Alloy → Mimir (metrics) + Loki (logs) + Tempo (traces)
-          ↓
-AI Layer: Prometheus alerts → ChromaDB RAG → LLM Incident Summary (in design)
+Prometheus alerts → ChromaDB RAG → LLM Incident Summary (in design)
 ```
 
 ---
@@ -128,23 +142,26 @@ The AIOps strategy is structured in 8 layers. Deployed today:
 ## 🛠️ Quick Start
 
 ```bash
-# 1. Provision AWS infrastructure
+# 1. Provision AWS infrastructure (optional — skip for local k3d demo)
 cd terraform && terraform apply
 
-# 2. Push to main — GitHub Actions builds images, Codefresh promotes to dev
+# 2. Edit a service and push — this triggers the full pipeline
 git push origin main
+# ↳ ci.yml runs: lint → test → Trivy scan
+# ↳ if CI passes: build-images.yml builds & pushes to GHCR
+# ↳ Codefresh is triggered: auto-promotes to dev, waits for approval before staging/prod
 
 # 3. Monitor GitOps sync
 KUBECONFIG=~/.kube/ai-sandbox/config kubectl get applications -n argocd
 
 # 4. Open dashboards
-# Grafana:          http://<public-ip>:3000
-# ArgoCD:           http://<public-ip>:32080
-# Kong proxy:       http://<public-ip>:8000
-# Service Dashboard: http://<public-ip>:8090
+# Grafana:           http://localhost:3000  (or <public-ip>:3000 on EC2)
+# ArgoCD:            http://localhost:32080
+# Kong proxy:        http://localhost:8000
+# Service Dashboard: http://localhost:8090
 ```
 
-> Full bootstrap guide with AWS OIDC setup, IAM bootstrap paths (CloudFormation / CloudShell / local Terraform), and GitHub Secrets config below.
+> Full local k3d setup and AWS bootstrap guide below.
 
 ---
 

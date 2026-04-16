@@ -322,8 +322,13 @@ serviceAccount:
   name: alloy
 
 # ClusterRole to read pods, nodes, endpoints, namespaces
+# nodes/proxy is required for the kubelet cAdvisor proxy endpoint
 rbac:
   create: true
+  extraClusterRoleRules:
+    - apiGroups: [""]
+      resources: ["nodes/proxy"]
+      verbs: ["get"]
 
 serviceMonitor:
   enabled: false

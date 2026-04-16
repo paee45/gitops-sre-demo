@@ -28,14 +28,14 @@ tempo:
   resources:
     requests:
       cpu: 50m
-      memory: 96Mi
+      memory: 256Mi
     limits:
-      cpu: 300m
-      memory: 384Mi
+      cpu: 500m
+      memory: 768Mi
 
   extraEnv:
     - name: GOMEMLIMIT
-      value: "345MiB"
+      value: "700MiB"
 
   # Metrics generator — produces traces_spanmetrics_* and service-graph metrics
   # pushed to Mimir.  Powers the Service Map and RED panels in Grafana.

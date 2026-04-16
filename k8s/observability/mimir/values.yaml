@@ -1,7 +1,7 @@
 # Mimir — single-process (monolithic) deployment for demo
 # Chart: grafana/mimir-distributed 6.1.0-weekly.388
 # Using single-binary override to fit in t3.medium
-# Retention: 7 days via compactor_blocks_retention_period
+# Retention: 1 day via compactor_blocks_retention_period
 
 # Override to monolithic single-process mode
 mimir:
@@ -13,7 +13,7 @@ mimir:
           dir: /data
 
     limits:
-      compactor_blocks_retention_period: 168h   # 7 days
+      compactor_blocks_retention_period: 24h    # 1 day
       ingestion_rate: 10000
       ingestion_burst_size: 200000
       max_global_series_per_user: 1000000

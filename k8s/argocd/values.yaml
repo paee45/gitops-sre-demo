@@ -70,7 +70,7 @@ controller:
   args:
     operationProcessors: "2"
     statusProcessors: "5"
-    appResyncPeriod: "180"
+    appResyncPeriod: "30"
   resources:
     requests:
       cpu: 100m

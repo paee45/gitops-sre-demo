@@ -3,7 +3,7 @@
 # Retention: 7 days (168h)
 
 tempo:
-  retention: 168h     # 7 days
+  retention: 24h      # 1 day
 
   receivers:
     otlp:

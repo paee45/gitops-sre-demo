@@ -80,7 +80,27 @@ prometheus.scrape "pods" {
 }
 
 // ---------------------------------------------------------------------------
-// PIPELINE 2 — Kubelet cAdvisor (container CPU/memory for cAdvisor dashboard)
+// PIPELINE 2a — Node metrics via built-in unix exporter (replaces standalone node-exporter)
+// Alloy runs as DaemonSet so each pod scrapes its own node's /host/proc and /host/sys
+// ---------------------------------------------------------------------------
+
+prometheus.exporter.unix "node" {
+  procfs_path = "/host/proc"
+  sysfs_path  = "/host/sys"
+  rootfs_path = "/host/root"
+
+  // Disable collectors not useful in k3d containers
+  disable_collectors = ["wifi", "nfs", "nfsd", "zfs"]
+}
+
+prometheus.scrape "node_unix" {
+  targets         = prometheus.exporter.unix.node.targets
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.add_cluster.receiver]
+}
+
+// ---------------------------------------------------------------------------
+// PIPELINE 2b — Kubelet cAdvisor (container CPU/memory for cAdvisor dashboard)
 // ---------------------------------------------------------------------------
 
 discovery.kubernetes "nodes" {

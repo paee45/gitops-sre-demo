@@ -11,6 +11,16 @@ controller:
         hostPath:
           path: /var/log/pods
           type: DirectoryOrCreate
+      # Host mounts for prometheus.exporter.unix (node metrics — Pipeline 2a)
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: sys
+        hostPath:
+          path: /sys
+      - name: root
+        hostPath:
+          path: /
 
 alloy:
   configMap:
@@ -98,7 +108,24 @@ alloy:
       }
 
       // ---------------------------------------------------------------------------
-      // PIPELINE 2 — Kubelet cAdvisor (container CPU/memory for cAdvisor dashboard)
+      // PIPELINE 2a — Node metrics via built-in unix exporter
+      // ---------------------------------------------------------------------------
+
+      prometheus.exporter.unix "node" {
+        procfs_path = "/host/proc"
+        sysfs_path  = "/host/sys"
+        rootfs_path = "/host/root"
+        disable_collectors = ["wifi", "nfs", "nfsd", "zfs"]
+      }
+
+      prometheus.scrape "node_unix" {
+        targets         = prometheus.exporter.unix.node.targets
+        scrape_interval = "30s"
+        forward_to      = [prometheus.relabel.add_cluster.receiver]
+      }
+
+      // ---------------------------------------------------------------------------
+      // PIPELINE 2b — Kubelet cAdvisor (container CPU/memory for cAdvisor dashboard)
       // ---------------------------------------------------------------------------
 
       discovery.kubernetes "nodes" {
@@ -291,11 +318,22 @@ alloy:
       memory: 128Mi
 
   # Mount /var/log/pods from the host for log collection (Pipeline 3)
+  # and /proc /sys /root for prometheus.exporter.unix (Pipeline 2a)
   mounts:
     extra:
       - name: varlog-pods
         mountPath: /var/log/pods
         readOnly: true
+      - name: proc
+        mountPath: /host/proc
+        readOnly: true
+      - name: sys
+        mountPath: /host/sys
+        readOnly: true
+      - name: root
+        mountPath: /host/root
+        readOnly: true
+        mountPropagation: HostToContainer
 
   resources:
     requests:

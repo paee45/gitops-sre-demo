@@ -7,17 +7,10 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  sources:
-    - repoURL: https://grafana.github.io/helm-charts
-      chart: mimir-distributed
-      targetRevision: "6.0.6"
-      helm:
-        releaseName: mimir
-        valueFiles:
-          - $values/k8s/observability/mimir/values.yaml
-    - repoURL: https://github.com/paee45/gitops-sre-demo.git
-      targetRevision: HEAD
-      ref: values
+  source:
+    repoURL: https://github.com/paee45/gitops-sre-demo.git
+    targetRevision: HEAD
+    path: k8s/observability/mimir/manifests
   destination:
     server: https://kubernetes.default.svc
     namespace: lgtm

@@ -4,7 +4,7 @@
 
 End-to-end platform demonstrating modern cloud engineering best practices: GitOps delivery, CI/CD promotion pipelines, API governance with Kong, full LGTM observability stack, and an AI-assisted SRE layer for incident analysis.
 
-> 👉 Everything runs on a **single AWS EC2 t3.medium (~$33/month)** — production-grade practices at minimal cost.  
+> 👉 Everything runs on a **single AWS EC2 t3.medium (~$33/month)** — 
 > [Jump to live demo & walkthrough →](#showcase)
 
 ---

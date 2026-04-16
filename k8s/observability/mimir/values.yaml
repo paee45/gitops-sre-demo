@@ -17,6 +17,7 @@ mimir:
       ingestion_rate: 10000
       ingestion_burst_size: 200000
       max_global_series_per_user: 1000000
+      out_of_order_time_window: 15m             # accept WAL backlog samples up to 15m old
 
     compactor:
       compaction_interval: 30m

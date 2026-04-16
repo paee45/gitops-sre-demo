@@ -6,6 +6,11 @@
 # Override to monolithic single-process mode
 mimir:
   structuredConfig:
+    # Single-tenant demo — disables X-Scope-OrgID requirement so Tempo
+    # metrics generator (and any other component) can push without the header.
+    # All data is stored in the "anonymous" tenant (same as before).
+    multitenancy_enabled: false
+
     common:
       storage:
         backend: filesystem

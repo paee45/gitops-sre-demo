@@ -23,6 +23,10 @@ redis:
 
 server:
   replicas: 1
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8083"
+    prometheus.io/path: "/metrics"
   service:
     type: NodePort
     nodePortHttp: 32080
@@ -67,6 +71,10 @@ notifications:
 
 controller:
   replicas: 1
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8082"
+    prometheus.io/path: "/metrics"
   args:
     operationProcessors: "2"
     statusProcessors: "5"

@@ -1,75 +1,254 @@
-# Production-Grade GitOps SRE Platform (ArgoCD + Codefresh + LGTM)
+# 🚀 AI-Powered GitOps SRE Platform
 
-> **For recruiters and hiring managers** — see the [Showcase](#showcase) section below for a live demo link, a walkthrough script, and a quick summary of the engineering decisions made in this project.
+**Production-grade DevOps + SRE + AI Observability Demo**
 
-## 🚀 TL;DR
+End-to-end platform demonstrating modern cloud engineering best practices: GitOps delivery, CI/CD promotion pipelines, API governance with Kong, full LGTM observability stack, and an AI-assisted SRE layer for incident analysis.
 
-- GitOps platform using ArgoCD (App of Apps)
-- CI/CD split: GitHub Actions (build) → Codefresh (promotion)
-- Secure AWS setup with OIDC — no static credentials
-- Full observability (metrics, logs, traces) via LGTM stack
-- Deployment validation using SLOs (error rate, latency, and pod restarts)
-
-> 👉 Production-grade SRE platform running on a single EC2 (~$33/month)
->
-> Demonstrates how to build a safe, observable, and production-ready delivery platform from scratch.
-
-## Who this project is for
-
-- SRE / Platform Engineer roles
-- DevOps / Cloud Infrastructure positions
-- Teams adopting GitOps and observability-driven delivery
+> 👉 Everything runs on a **single AWS EC2 t3.medium (~$33/month)** — production-grade practices at minimal cost.  
+> [Jump to live demo & walkthrough →](#showcase)
 
 ---
 
-A production-grade GitOps SRE platform running on a **single AWS EC2 instance** (Debian 12, t3.medium), designed to demonstrate real-world delivery, observability, and security practices.  
-Infrastructure is managed by Terraform, application state is managed by ArgoCD (App of Apps), and observability is the full **LGTM stack** (Loki · Grafana · Tempo · Mimir) collected by Grafana Alloy.
+## ⚡ What This Proves (in 30 seconds)
+
+- ✅ **GitOps deployment** with Argo CD App of Apps — zero manual `kubectl apply`
+- ✅ **Full CI quality gate** — lint (`golangci-lint`), unit tests (`go test -race`), coverage upload, then Trivy image scan blocks on CRITICAL/HIGH CVEs before any push
+- ✅ **CD promotion pipeline** — GitHub Actions (build + push to GHCR) → Codefresh (dev → staging → production with approval gates)
+- ✅ **API control** via Kong — JWT auth, rate limiting (60 req/min), observable 3-phase demo
+- ✅ **Full observability** with Grafana LGTM stack (Logs + Metrics + Traces) + correlated drill-down
+- ✅ **Incident-ready** system with SLO dashboards, self-healing ArgoCD, and Prometheus alerting
+- ✅ **AI SRE foundation** — RAG vector store (ChromaDB) deployed; LLM incident analysis wired in design
+- ✅ **Secure by design** — OIDC (no static keys), IAM permission boundaries, Trivy SARIF → GitHub Security tab, least-privilege RBAC
+
+---
+
+## 🧠 Architecture Overview
 
 ```
-GitHub Push
-    │
-    ├─ .github/workflows/pipeline.yml ──► plan (read-only, any branch)
-    │                                 └── apply (main only, approval gate) ──► EC2 (t3.medium)
-    │                                                                                │
-    └─ .github/workflows/build-images.yml ─► GHCR (container registry) ─► trigger Codefresh promotion pipeline
-                                                                                     │
-                                                                                     ▼
-                              ArgoCD (App of Apps) ◄── git pull ─────────────────── K3s
-                                   │
-                        ┌──────────┼──────────┐
-                        ▼          ▼          ▼
-                      LGTM        Alloy    service-a / service-b
-                 (Loki·Mimir   (DaemonSet)   (Go HTTP + worker)
-                  Tempo·Grafana)
+Developer → Git Push
+          ↓
+GitHub Actions (CI: build + push image → GHCR)
+          ↓
+Codefresh (CD: dev → staging → production with approval gates)
+          ↓
+GitOps Repo (k8s/ manifests updated via image tag commit)
+          ↓
+ArgoCD (App of Apps → auto-sync on K3s / AWS EC2)
+          ↓
+Kong (API Gateway: JWT auth + rate limiting)
+          ↓
+Application Services (service-a, service-b — Go; service-dashboard — React+Node)
+          ↓
+Observability: Grafana Alloy → Mimir (metrics) + Loki (logs) + Tempo (traces)
+          ↓
+AI Layer: Prometheus alerts → ChromaDB RAG → LLM Incident Summary (in design)
 ```
 
 ---
 
-## Architecture
+## 🎯 Key Demo Scenarios
 
-| Layer | Component | Notes |
+### 🔥 1. Safe GitOps Deployment
+Push a commit → GitHub Actions builds the image → Codefresh promotes it through environments (with approval gates) → ArgoCD syncs Kubernetes → **Deployment Health dashboard** validates error rate, P95 latency, and pod stability in real time. A deploy isn't "done" until the SLO gauges stay green.
+
+### 🚨 2. API Attack & Recovery (Kong 3-Phase Demo)
+- **Phase 1** — hit service-a directly with 500 concurrent requests → error rate spikes (no protection)
+- **Phase 2** — same flood through Kong without a JWT → 100% `401`, service-a receives zero requests
+- **Phase 3** — burst with valid JWT → first 60 req/min pass (`200`), remainder return `429`; service-a P95 latency stays flat
+
+Observable in real time on the **Kong — Traffic & Protection** Grafana dashboard.
+
+### 🤖 3. AI SRE Assistant (RAG Layer)
+ChromaDB vector store is running in the `aiops` namespace, indexed nightly from README, Kubernetes manifests, alert rules, and Grafana dashboard definitions. Designed to augment LLM prompts with project-specific context for zero-hallucination incident summaries:
+- *"What does `KongHighRateLimitHit` mean and what is the runbook?"*
+- *"Which service is failing and what changed before the incident?"*
+- *"Is this an SLO violation? What is the remediation step?"*
+
+---
+
+## 🧩 Tech Stack
+
+| Area | Tools |
+|---|---|
+| **CI** | GitHub Actions — lint (`golangci-lint`), test (`go test -race` + coverage), Trivy scan (blocks on CRITICAL/HIGH), build + push to GHCR |
+| **CD / Promotion** | Codefresh (dev → staging → production, approval gates) |
+| **GitOps** | Argo CD (App of Apps, self-managed) |
+| **Infrastructure** | Terraform (S3+DynamoDB backend, OIDC provider, permission boundaries) |
+| **Cloud** | AWS EC2 t3.medium — Debian 12, K3s |
+| **API Gateway** | Kong (DB-less KIC — JWT auth, rate limiting, Prometheus metrics) |
+| **Metrics** | Grafana Mimir (remote-write target, 7-day retention) |
+| **Logs** | Grafana Loki (structured LogQL, 7-day retention) |
+| **Traces** | Grafana Tempo (OTLP, trace↔log↔metric correlation) |
+| **Collector** | Grafana Alloy (DaemonSet, River config, pod annotation scraping) |
+| **Dashboards** | Grafana 12 — 10 dashboards (7 community + 3 custom GitOps ConfigMaps) |
+| **Alerting** | Prometheus + Alertmanager (4 Kong/SLO alert rules + recording rules for forecast) |
+| **AI Layer** | ChromaDB (RAG vector store) + sentence-transformers (local embeddings) |
+| **Security** | IAM OIDC (no static credentials), permission boundaries, Trivy image scanning |
+| **Services** | Go (service-a HTTP API + service-b worker), React + Node.js dashboard |
+
+---
+
+## 📊 Observability (LGTM)
+
+- **Metrics** — Prometheus + Mimir: latency P95, error rate, SLO gauges, ArgoCD sync frequency
+- **Logs** — Loki: structured JSON via `slog`, LogQL queries, `traceID` correlation field
+- **Traces** — Tempo: OTLP from Go services, span metrics → Mimir, service topology map
+- **Dashboards** — Grafana: Deployment Health · Kong Traffic · Tempo Distributed Traces · cluster/node/container resources
+- **Correlation** — click a trace span → jump to the exact Loki log line; click a log `traceID` → full flame graph in Tempo
+
+---
+
+## 🤖 AI SRE Assistant
+
+The AIOps strategy is structured in 8 layers. Deployed today:
+
+| Layer | Status | What it does |
 |---|---|---|
-| Cloud | AWS EC2 t3.medium (4 GB) | Debian 12, gp3 30 GB, IMDSv2 |
-| Orchestrator | K3s (latest) | Traefik + servicelb disabled |
-| GitOps | ArgoCD 3.3.6 | App of Apps, NodePort 32080 |
-| Metrics | Grafana Mimir | monolithic mode, 7d retention |
-| Logs | Grafana Loki | SingleBinary, 7d retention |
-| Traces | Grafana Tempo | OTLP gRPC+HTTP, 7d retention |
-| Dashboards | Grafana 12 | 10 dashboards (7 community + 3 custom GitOps ConfigMaps) |
-| Collector | Grafana Alloy | DaemonSet, River config |
-| Services | service-a (HTTP) | orders API, Prometheus + OTLP |
-| Services | service-b (worker) | background jobs, Prometheus + OTLP |
-| CI | GitHub Actions | OIDC → AWS (plan + apply roles), GHCR (container registry), triggers Codefresh promotion pipeline |
-| CD promotion | Codefresh | `codefresh.yml` — dev → staging → production with approval gates |
-| IaC | Terraform | S3+DynamoDB backend, OIDC provider, permission boundaries |
+| Metrics + Dashboards | ✅ Active | Kong + deployment SLO dashboards with PromQL |
+| Prometheus Alerting | ✅ Active | 4 alert rules (429 rate, 401 rate, 5xx SLO, P95 latency) |
+| Log Anomaly Ratio | 🔲 Planned | Loki ratio: current vs 1-hour baseline — fires at 3×, pages at 10× |
+| IsolationForest | 🔲 Planned | Multi-dimensional pattern detection on Loki log vectors |
+| Metric Forecasting | 🔲 Planned | Prophet model on Mimir 7-day history — alert *before* rate limit ceiling hit |
+| LLM Incident Response | 🔲 Planned | Flask endpoint in Service Dashboard: one-click incident summary |
+| **RAG Foundation** | ✅ **Deployed** | ChromaDB in `aiops` ns + nightly indexer: runbooks / incidents / dashboards |
+| Synthetic Load AI | 🔲 Planned | AI-generated realistic traffic patterns for stress testing |
 
 ---
 
-## Security Model
+## 🔐 DevSecOps
 
-### IAM credential flow
+- **No static AWS credentials** — GitHub Actions uses OIDC JWT tokens (15-min TTL STS credentials)
+- **Trivy image scanning** — runs at build time (`ci.yml`) before push; `exit-code: 1` blocks CI on CRITICAL/HIGH CVEs; SARIF results uploaded to GitHub Security tab automatically
+- **IAM permission boundaries** — hard-cap on all roles; privilege escalation via Terraform is structurally blocked
+- **Least-privilege RBAC** — two-role CI/CD pattern: `plan` role (read-only, any branch) + `apply` role (write, `main` + approval gate only)
+- **SSH key management** — generated by Terraform, stored in AWS Secrets Manager, never on disk or in git
 
-No static AWS credentials are ever stored. GitHub Actions uses OIDC JWT tokens that are exchanged for short-lived STS credentials.
+---
+
+## 🛠️ Quick Start
+
+```bash
+# 1. Provision AWS infrastructure
+cd terraform && terraform apply
+
+# 2. Push to main — GitHub Actions builds images, Codefresh promotes to dev
+git push origin main
+
+# 3. Monitor GitOps sync
+KUBECONFIG=~/.kube/ai-sandbox/config kubectl get applications -n argocd
+
+# 4. Open dashboards
+# Grafana:          http://<public-ip>:3000
+# ArgoCD:           http://<public-ip>:32080
+# Kong proxy:       http://<public-ip>:8000
+# Service Dashboard: http://<public-ip>:8090
+```
+
+> Full bootstrap guide with AWS OIDC setup, IAM bootstrap paths (CloudFormation / CloudShell / local Terraform), and GitHub Secrets config below.
+
+---
+
+## 📌 Why This Matters
+
+This project demonstrates how to:
+- Build **production-ready delivery pipelines** — promotable, approval-gated, audit-trailed
+- Operate systems with **SRE best practices** — SLO-validated deploys, self-healing GitOps, alert rules
+- Implement **observability-driven debugging** — correlated logs, metrics, and traces in one click
+- Apply **AI to real operational problems** — RAG-grounded incident analysis, metric forecasting design
+
+---
+
+## 👤 Author
+
+**Rattanakorn Rerkdee**  
+SRE / Platform Engineer — GitOps · Observability · AI
+
+> Not just deployment — this is a complete platform for **building, operating, and debugging** modern cloud systems.
+
+---
+
+---
+
+## 🛠️ Local Demo Setup (k3d)
+
+The entire platform runs locally on **k3d** — no AWS account required for running the demo.
+
+### Prerequisites
+
+| Tool | Version | Purpose |
+|---|---|---|
+| Docker Desktop | ≥ 24 | k3d node runtime |
+| k3d | ≥ 5.6 | local Kubernetes |
+| kubectl | ≥ 1.29 | cluster interaction |
+| ArgoCD CLI | ≥ 2.10 | optional — UI login helper |
+| Go | ≥ 1.21 | local build / test |
+
+### 1 — Create the cluster
+
+```bash
+k3d cluster create gitops-sre-demo \
+  --servers 1 --agents 2 \
+  -p "8000:8000@loadbalancer" \
+  -p "8090:8090@loadbalancer" \
+  -p "3000:3000@loadbalancer" \
+  -p "32080:32080@loadbalancer" \
+  --wait
+
+# Export the kubeconfig (all kubectl commands use this)
+export KUBECONFIG=~/.kube/ai-sandbox/config
+```
+
+### 2 — Bootstrap ArgoCD
+
+```bash
+kubectl create namespace argocd
+kubectl apply -n argocd \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# Wait for ArgoCD to be ready
+kubectl wait --for=condition=available deploy/argocd-server -n argocd --timeout=120s
+
+# Install the root App-of-Apps
+kubectl apply -f argocd/root-app.yaml
+```
+
+ArgoCD will recursively discover every `k8s/**/app.yaml` and sync all stacks in the correct wave order.
+
+### 3 — Access the platform
+
+| Service | URL | Default credentials |
+|---|---|---|
+| ArgoCD | http://localhost:32080 | `admin` / `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' \| base64 -d` |
+| Grafana | http://localhost:3000 | `admin` / `admin` |
+| Kong proxy | http://localhost:8000 | — |
+| Service Dashboard | http://localhost:8090 | — |
+
+### 4 — Run the demo scenarios
+
+**Safe deployment** — edit any `src/` file, push; GitHub Actions builds the image → Codefresh promotes → ArgoCD syncs → Deployment Health dashboard stays green.
+
+**API attack simulation (load generator):**
+
+```bash
+# Phase 1 — direct attack (no gateway)
+kubectl apply -f demo/load-generator/phase1-direct-attack.yaml
+
+# Phase 2 — through Kong, no JWT (all 401)
+kubectl apply -f demo/load-generator/phase2-kong-unauth.yaml
+
+# Phase 3 — valid JWT, rate limited (429 after 60 req/min)
+kubectl apply -f demo/load-generator/phase3-kong-ratelimited.yaml
+```
+
+Watch the **Kong — Traffic & Protection** dashboard in real time.
+
+---
+
+## 🔐 AWS / Terraform Setup (optional)
+
+The Terraform config provisions an EC2 instance to run the same k3d cluster in the cloud. It uses OIDC — no static AWS credentials anywhere.
+
+### OIDC credential flow
 
 ```
 GitHub Actions runner
@@ -78,1476 +257,103 @@ GitHub Actions runner
 GitHub OIDC provider (token.actions.githubusercontent.com)
     │  issues signed JWT (sub: repo:paee45/gitops-sre-demo:ref:refs/heads/main)
     ▼
-AWS STS AssumeRoleWithWebIdentity
-    │  validates JWT, checks sub/aud conditions on the IAM role trust policy
-    ▼
-Temporary credentials (15-min TTL)
+AWS STS AssumeRoleWithWebIdentity → Temporary credentials (15-min TTL)
 ```
 
 ### Two-role CI/CD pattern
 
-| Role | Used by pipeline job | Branch scope | Permissions |
-|---|---|---|---|
-| `gitops-sre-demo-github-plan` | `plan` | any branch / PR | EC2 describe, S3 state read, DynamoDB read |
-| `gitops-sre-demo-github-actions` | `apply` | `main` only (+ `production` env approval) | EC2 full, S3 state write, Secrets Manager, key pair |
+| Role | Scope | Permissions |
+|---|---|---|
+| `gitops-sre-demo-github-plan` | Any branch / PR | EC2 describe, S3 state read, DynamoDB read |
+| `gitops-sre-demo-github-actions` | `main` only + production approval | EC2 full, S3 state write, Secrets Manager |
 
 ### Permission boundary
 
-Every IAM role created by Terraform (including the two CI roles and the EC2 instance role) has a `permissions_boundary` attached. AWS evaluates both the role policy and the boundary — the effective permission is the **intersection**. Even if a role policy were accidentally over-scoped, the boundary hard-caps it to EC2 + this project's S3/DynamoDB/Secrets Manager resources. Privilege escalation via Terraform is structurally blocked.
+Every role created by Terraform has a `permissions_boundary` hard-capping it to EC2 + this project's S3/DynamoDB/Secrets Manager resources. Privilege escalation via over-scoped Terraform is structurally blocked.
 
-The boundary explicitly includes the full `ssm:*`, `ssmmessages:*`, and `ec2messages:*` action sets required by `AmazonSSMManagedInstanceCore`. Without these, the effective permission for the EC2 instance role would be the empty set — SSM Session Manager and Run Command would silently fail.
+### Required GitHub Secrets / Variables
 
-### SSH key management
+| Secret / Var | Where | Value |
+|---|---|---|
+| `AWS_PLAN_ROLE_ARN` | Secret | ARN of the plan role (from `terraform output`) |
+| `AWS_APPLY_ROLE_ARN` | Secret | ARN of the apply role (from `terraform output`) |
+| `AWS_ACCOUNT_ID` | Secret | Your personal AWS account ID |
+| `CODEFRESH_API_TOKEN` | Secret | Codefresh → User Settings → API Keys |
+| `AWS_REGION` | Variable | e.g. `ap-southeast-1` |
+| `TF_STATE_BUCKET` | Variable | S3 bucket name from bootstrap |
+| `TF_STATE_DYNAMODB_TABLE` | Variable | DynamoDB table name from bootstrap |
 
-The EC2 SSH private key is generated by Terraform (`tls_private_key`) and stored in AWS Secrets Manager. It is never written to disk or committed. Retrieve it at any time with:
-
-```bash
-# One-liner from terraform output
-terraform -chdir=terraform output -raw ssh_command | bash
-```
-
----
-
-## Prerequisites
-
-- Personal AWS account (not shared/work — see Account Safety below)
-- Terraform ≥ 1.5
-- AWS CLI configured with a named profile (e.g. `personal`)
-- GitHub repository forked or created from this project
-- GitHub environment named `production` with at least one required reviewer
-
----
-
-## Account Safety
-
-Both the bootstrap config and the main config contain an **account guard**. If the active AWS profile resolves to a different account than `var.aws_account_id`, Terraform fails immediately before creating any resource:
-
-```
-ERROR: Wrong AWS account!
-Expected : 123456789012
-Active   : 860808973354
-Fix: export AWS_PROFILE=personal
-```
-
-### Recommended: IAM Identity Center (SSO)
-
-IAM Identity Center issues **short-lived CLI tokens** (1-hour TTL) instead of static access keys stored under `~/.aws/credentials`. Long-lived keys are the #1 cause of personal-account takeovers.
+### Bootstrap (first time only)
 
 ```bash
-# One-time setup (after enabling Identity Center in the AWS Console)
-aws configure sso --profile personal
-# → follow browser prompt, select your account + AdministratorAccess permission set
+# Option A — CloudFormation (no local Terraform needed)
+# GitHub → Actions → "Bootstrap Terraform Backend" → Run workflow
 
-# Daily use — token expires after 1 hour, re-login with the same command
-aws sso login --profile personal
-export AWS_PROFILE=personal
-aws sts get-caller-identity   # confirm personal account
-```
-
-After bootstrap completes, replace `AdministratorAccess` in Identity Center with the scoped bootstrap policy ARN (step 4 of Bootstrap Sequence). From that point your SSO session only has read access locally; all writes go through GitHub Actions OIDC.
-
-### Fallback: named IAM user profile
-
-If Identity Center is not available, use a **separate named profile** — never the default profile or root credentials:
-
-```bash
-aws configure --profile personal
-export AWS_PROFILE=personal
-aws sts get-caller-identity   # confirm it shows your personal account
-```
-
----
-
-## Bootstrap Sequence
-
-### Step 0 — Choose your bootstrap path
-
-There is a chicken-and-egg problem: Terraform needs an S3 bucket to store remote state, but creating that bucket via Terraform requires state to already exist. Three paths break this cycle — pick one:
-
-| Path | Local tooling needed | Static credentials | Best for |
-|---|---|---|---|
-| **A — GitHub Actions + CloudFormation** | None | Yes, one-time only | Strict no-local-run policy |
-| **B — AWS CloudShell** | None | No (uses console session) | Quick start, any machine |
-| **C — Local Terraform bootstrap** | Terraform + AWS CLI | Yes (or SSO) | Full IaC consistency |
-
-All three paths produce the same result: an S3 bucket with Object Lock + a DynamoDB table. After either path, steps 2–6 are identical.
-
----
-
-### Path A — GitHub Actions + CloudFormation (zero local tooling)
-
-CloudFormation stores its own state inside AWS — no local state file. This is why it can bootstrap Terraform's state backend without needing Terraform itself.
-
-**One-time setup (5 minutes in the AWS Console):**
-
-1. IAM → Users → Create user `terraform-bootstrap`
-2. Attach the inline policy below (minimum permissions for CFN to create S3 + DynamoDB):
-
-<details>
-<summary>Bootstrap IAM policy (expand)</summary>
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "CloudFormation",
-      "Effect": "Allow",
-      "Action": [
-        "cloudformation:CreateStack",
-        "cloudformation:UpdateStack",
-        "cloudformation:DescribeStacks",
-        "cloudformation:DescribeStackEvents",
-        "cloudformation:GetTemplate",
-        "cloudformation:ValidateTemplate"
-      ],
-      "Resource": "arn:aws:cloudformation:*:*:stack/gitops-sre-demo-tf-backend/*"
-    },
-    {
-      "Sid": "S3Backend",
-      "Effect": "Allow",
-      "Action": [
-        "s3:CreateBucket", "s3:PutBucketVersioning",
-        "s3:PutEncryptionConfiguration", "s3:PutBucketPublicAccessBlock",
-        "s3:PutBucketObjectLockConfiguration", "s3:PutBucketTagging",
-        "s3:GetBucket*", "s3:ListAllMyBuckets"
-      ],
-      "Resource": "arn:aws:s3:::paee45-gitops-sre-tf-state"
-    },
-    {
-      "Sid": "DynamoDB",
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:CreateTable", "dynamodb:DescribeTable",
-        "dynamodb:UpdateTable", "dynamodb:TagResource", "dynamodb:ListTagsOfResource"
-      ],
-      "Resource": "arn:aws:dynamodb:*:*:table/terraform-state-lock"
-    }
-  ]
-}
-```
-</details>
-
-3. Security credentials → Create access key → copy key ID + secret
-4. Add to GitHub Secrets:
-   - `AWS_BOOTSTRAP_ACCESS_KEY_ID`
-   - `AWS_BOOTSTRAP_SECRET_ACCESS_KEY`
-
-**Run the workflow:**
-
-```
-GitHub repo → Actions → Bootstrap Terraform Backend → Run workflow
-```
-
-All inputs are pre-filled with project defaults. Click **Run workflow**.
-
-The workflow deploys `terraform/bootstrap/cfn-backend.yaml` and prints the `terraform init` command in the job summary.
-
-**After it succeeds — clean up:**
-
-1. AWS Console → IAM → `terraform-bootstrap` → delete the access key
-2. GitHub → Settings → Secrets → delete `AWS_BOOTSTRAP_ACCESS_KEY_ID` and `AWS_BOOTSTRAP_SECRET_ACCESS_KEY`
-3. Continue from [step 2 below](#step-2--fill-in-terraformtfvars)
-
----
-
-### Path B — AWS CloudShell (zero local tooling, no static credentials)
-
-CloudShell runs inside the AWS Console under your current session — no keys needed.
-
-```bash
-# Open CloudShell in the AWS Console (top-right toolbar icon)
-
-# Install Terraform (CloudShell has the AWS CLI pre-installed)
-sudo yum install -y yum-utils
-sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
-sudo yum install -y terraform
-
-# Clone and run bootstrap
-git clone https://github.com/paee45/gitops-sre-demo.git
-cd gitops-sre-demo/terraform/bootstrap
-
-# Edit terraform.tfvars with your account ID (see step 2 below for values)
-nano terraform.tfvars
-
-terraform init
-terraform apply
-```
-
-Continue from [step 2 below](#step-2--fill-in-terraformtfvars).
-
----
-
-### Path C — Local Terraform bootstrap
-
-Standard path — requires Terraform + AWS CLI (or SSO) locally.
-
-```bash
-aws sso login --profile personal   # or: aws configure --profile personal
-export AWS_PROFILE=personal
-
+# Option B — local Terraform
 cd terraform/bootstrap
 terraform init
-terraform apply
+terraform apply     # creates S3 bucket + DynamoDB table
 ```
 
-Continue to step 2.
-
----
-
-### Step 1 — Set up your local AWS profile (Paths B and C only)
-
-**Preferred (IAM Identity Center / SSO) — short-lived tokens, no static keys on disk:**
+After bootstrap:
 
 ```bash
-aws configure sso --profile personal
-aws sso login --profile personal
-export AWS_PROFILE=personal
-aws sts get-caller-identity   # note the Account field — you need it in step 2
+cd terraform
+terraform init
+# Push to main or open a PR — GitHub Actions runs plan automatically
 ```
 
-**Fallback (IAM user with long-lived keys):**
+SSH key is generated by Terraform and stored in AWS Secrets Manager — never on disk:
 
 ```bash
-aws configure --profile personal
-export AWS_PROFILE=personal
-aws sts get-caller-identity
-```
-
----
-
-### Step 2 — Fill in terraform.tfvars files
-
-**`terraform/bootstrap/terraform.tfvars`** (skip if using Path A — CloudFormation handles this):
-```hcl
-aws_account_id          = "123456789012"   # your personal account ID
-aws_region              = "us-east-1"
-project_name            = "gitops-sre-demo"
-tf_state_bucket         = "paee45-gitops-sre-tf-state"
-tf_state_dynamodb_table = "terraform-state-lock"
-```
-
-**`terraform/terraform.tfvars`:**
-```hcl
-aws_account_id          = "123456789012"   # same account ID
-aws_region              = "us-east-1"
-project_name            = "gitops-sre-demo"
-allowed_ssh_cidr        = "1.2.3.4/32"    # your current public IP
-github_org              = "paee45"
-github_repo             = "gitops-sre-demo"
-tf_state_bucket         = "paee45-gitops-sre-tf-state"
-tf_state_dynamodb_table = "terraform-state-lock"
-
-# Optional — GitHub PAT with read:packages scope.
-# Terraform uses this to create an imagePullSecret on the K3s node so it can
-# pull private GHCR images. Leave blank and make packages public instead (see note below).
-# ghcr_token = "ghp_your_token_here"
-```
-
-> **GHCR image visibility:** After the first CI push (`src/` change on `main`), your container
-> images land in GitHub Packages as **private** by default. Either set `ghcr_token` above, or
-> make both packages public: GitHub → your profile → Packages → select `service-a` (then
-> `service-b`) → Package Settings → Change visibility → Public.
-
-> **What all bootstrap paths create:**
-> - **S3 bucket** — versioning, SSE-AES256, public access block, **Object Lock (GOVERNANCE, 30-day retention)**. Object Lock must be set at creation time — it cannot be added to an existing bucket. GOVERNANCE mode protects state file versions from deletion for 30 days after upload.
-> - **DynamoDB table** — state locking with SSE
-> - **Scoped IAM policy** (Paths B/C only) — `bootstrap_policy_arn` output: the minimum-privilege policy to run bootstrap; replace `AdministratorAccess` with this after the first apply
-
----
-
-### Step 3 — Detach AdministratorAccess (Paths B and C only)
-
-After bootstrap completes, replace the broad policy on your bootstrap IAM user:
-
-1. AWS Console → IAM → Users → your bootstrap user → Permissions
-2. Detach `AdministratorAccess`
-3. Attach the policy ARN from `terraform output bootstrap_policy_arn`
-
-All future writes go through the GitHub Actions OIDC role — the local user only needs read access.
-
----
-
-### Step 4 — Run the main Terraform config
-
-```bash
-cd terraform/   # from repo root
-
-# Init with S3 backend (command printed by bootstrap output)
-terraform init \
-  -backend-config="bucket=paee45-gitops-sre-tf-state" \
-  -backend-config="key=gitops-sre-demo/terraform.tfstate" \
-  -backend-config="region=us-east-1" \
-  -backend-config="dynamodb_table=terraform-state-lock"
-
-terraform apply
-```
-
-This creates: OIDC provider, two IAM roles, permission boundary, EC2 instance, security group, SSH key pair, and Secrets Manager entry.
-
-### Step 5 — Configure GitHub Secrets and Variables
-
-```
-GitHub repo → Settings → Secrets and variables → Actions
-```
-
-| Name | Type | Value |
-|---|---|---|
-| `AWS_ACCOUNT_ID` | Secret | `terraform output -raw aws_account_id` |
-| `AWS_ROLE_ARN` | Secret | `terraform output -raw iam_role_arn` |
-| `AWS_PLAN_ROLE_ARN` | Secret | `terraform output -raw iam_plan_role_arn` |
-| `AWS_REGION` | Variable | `us-east-1` |
-| `TF_STATE_BUCKET` | Variable | `paee45-gitops-sre-tf-state` |
-| `TF_STATE_DYNAMODB_TABLE` | Variable | `terraform-state-lock` |
-
-### Step 6 — Create the production environment (apply gate)
-
-```
-GitHub repo → Settings → Environments → New environment
-Name: production
-Required reviewers: add yourself (or a team)
-```
-
-The `apply` pipeline job requires approval from this environment before running `terraform apply`. The `plan` job runs freely on every push and PR.
-
-### Step 7 — Push to main
-
-Any push to `main` will now trigger:
-- `plan` job — runs `terraform plan`, posts output as a PR comment
-- `apply` job — waits for `plan` to pass, then waits for environment approval, then runs `terraform apply`
-
-Any push touching `src/**` triggers the image build workflow, which builds and pushes both Go service images to GHCR.
-
-After the first full apply the EC2 instance boots, installs K3s, installs ArgoCD, and applies the root App of Apps. All LGTM components and microservices are then synced by ArgoCD automatically.
-
----
-
-## Accessing the Demo
-
-Once `terraform apply` completes:
-
-```bash
-terraform -chdir=terraform output
-```
-
-| Output | Description |
-|---|---|
-| `instance_public_ip` | EC2 public IP address |
-| `grafana_url` | `http://<public-ip>:3000` |
-| `argocd_url` | `http://<public-ip>:32080` |
-| `kong_url` | `http://<public-ip>:8000` — Kong API Gateway proxy |
-| `dashboard_url` | `http://<public-ip>:8090` — Service Dashboard (status & tests) |
-| `ssh_key_secret_arn` | Secrets Manager ARN for the SSH private key |
-| `ssh_command` | One-liner: fetches key from SM then SSHs |
-| `iam_role_arn` | GitHub Actions apply role ARN |
-| `iam_plan_role_arn` | GitHub Actions plan role ARN |
-
-### SSH access
-
-```bash
-# Retrieve key and connect in one command
 terraform -chdir=terraform output -raw ssh_command | bash
-
-# Or manually
-aws secretsmanager get-secret-value \
-  --secret-id <ssh_key_secret_arn> \
-  --query SecretString --output text > /tmp/k3s.pem
-chmod 600 /tmp/k3s.pem
-ssh -i /tmp/k3s.pem admin@<public-ip>
-```
-
-### Grafana
-
-- URL: `http://<public-ip>:3000`
-- Login: anonymous Viewer access (no credentials needed for demo)
-- All 10 dashboards are auto-provisioned under **Dashboards → Browse**
-
-### ArgoCD
-
-- URL: `http://<public-ip>:32080`
-- Username: `admin`
-- Password:
-
-```bash
-ssh admin@<ip> 'kubectl -n argocd get secret argocd-initial-admin-secret \
-    -o jsonpath="{.data.password}" | base64 -d'
 ```
 
 ---
 
-## Pre-wired Grafana Dashboards
-
-| Dashboard | gnetId | What it shows |
-|---|---|---|
-| Kubernetes / Compute Resources / Cluster | 6417 | Cluster-wide CPU, memory, network |
-| Kubernetes / Nodes | 8171 | Per-node resource usage |
-| cAdvisor Metrics | 14282 | Container-level CPU + memory |
-| Loki / Logs | 14055 | Log volume + log explorer |
-| Go RED Metrics | 10127 | Rate, Errors, Duration for Go services |
-| ArgoCD | 14584 | Sync status, app health |
-| Tempo / Distributed Tracing | 19689 | Trace search + latency heatmap |
-| **Deployment Health** (custom) | — | Deploy frequency · SLO gauges · Error rate · Latency P95 · Pod restarts |
-| **Kong — Traffic & Protection** (custom) | — | RPS · 401/429/5xx rates · upstream latency P95 · SLO gauges vs service-a |
-| **Tempo — Distributed Traces** (custom) | — | Span rate · error rate · P99 per service (from metrics generator) · Service Map topology · Recent Traces with flame-graph drill-down |
-
-Trace-to-logs and trace-to-metrics correlation is configured. Click a trace span in Tempo to jump directly to the correlated Loki log stream. Click any traceID in Loki logs to jump to the full flame graph in Tempo.
-
----
-
-## Observability Signal Flow
+## 📁 Repository Structure
 
 ```
-service-a / service-b
-    │
-    ├── /metrics (Prometheus exposition) ◄── Alloy pod annotation scrape
-    │                                              │
-    │                                              ▼
-    │                                         Mimir (remote_write)
-    │
-    ├── stdout (JSON via slog) ◄── Alloy loki.source.file
-    │                                              │
-    │                                              ▼
-    │                                         Loki (push)
-    │
-    └── OTLP HTTP :4318 ──► Alloy otelcol receiver
-                                          │
-                                          ▼
-                                     Tempo (OTLP gRPC)
-```
-
-Alloy also scrapes kubelet cAdvisor on every node and forwards to Mimir.
-
----
-
-## Distributed Tracing
-
-### Trace pipeline
-
-```
-service-a / service-b
-    │  OTLP HTTP (host:port — no scheme)
-    ▼
-Alloy  otelcol.receiver.otlp.default  (pod port 4318)
-    │  OTLP gRPC
-    ▼
-Tempo  (stores spans, 7d retention)
-    │  metrics generator
-    ▼
-Mimir  traces_spanmetrics_* + traces_service_graph_*
-    │
-    ▼
-Grafana  "Tempo — Distributed Traces" dashboard
-```
-
-### Instrumentation
-
-Both services use the Go OTEL SDK:
-- `otelhttp.NewHandler()` middleware creates one span per HTTP request automatically
-- `sdktrace.AlwaysSampler()` — 100% sampling (appropriate for a demo)
-- Every `slog` log line includes `traceID` + `spanID` fields
-- Loki derived field on `traceID` → one click from a log line to the full flame graph in Tempo
-- Grafana Tempo datasource has `tracesToLogsV2` and `tracesToMetrics` wired → bidirectional correlation
-
-### Verifying traces
-
-```bash
-# Port-forward Tempo and query the search API
-KUBECONFIG=~/.kube/ai-sandbox/config kubectl port-forward svc/tempo -n lgtm 3200:3200 &
-curl -s 'http://localhost:3200/api/search?limit=5' | jq '.traces[] | {service: .rootServiceName, trace: .traceID}'
-# → {"service":"service-a","trace":"68a1e4e9..."}
-# → {"service":"service-b","trace":"..."}
-```
-
-### Dashboard
-
-**Grafana → SRE Demo → "Tempo — Distributed Traces"**
-
-| Panel | Source | What it shows |
-|---|---|---|
-| Span Rate | `traces_spanmetrics_calls_total` in Mimir | Requests/sec per service |
-| Error Rate | `traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}` | % of erroring spans |
-| P99 Duration | `traces_spanmetrics_duration_milliseconds_bucket` | 99th-percentile latency per service |
-| Service Map | Tempo nodeGraph / serviceMap | Topology of inter-service calls |
-| Recent Traces | Tempo nativeSearch | Click any TraceID → flame graph drill-down |
-
----
-
-## AIOps Strategy — AI-Powered SRE
-
-> A deep background in IBM Data Engineering, IBM AI/ML (IsolationForest, Prophet, Flask/Python), BI (Power BI, Tableau), and Azure/Kubernetes architecture maps directly to the SRE industry's shift toward AIOps. The framework below shows how those skills converts to three pillars that reduce MTTR (Mean Time To Resolution).
-
-### The Four AIOps Pillars
-
-| Pillar | SRE Problem Solved | Applicable Skills | Status |
-|---|---|---|---|
-| **Log Anomaly Detection** | Replace static threshold alerts with ML-based baseline comparison on Loki streams | IBM AI Engineering, Python | 🔲 Planned |
-| **Metric Forecasting** | Predict SLO breaches before they occur using historical Mimir/Prometheus data | IBM Data Science, Power BI, Tableau | 🔲 Planned |
-| **LLM-Augmented Incident Response** | Auto-summarize incident context from Kong + application logs in plain English in seconds | IBM AI Developer, Flask | 🔲 Planned |
-| **RAG Runbook Retrieval** | Augment LLM answers with project-specific runbooks, past incidents, and dashboard definitions — zero API-key leakage of internal config | sentence-transformers, ChromaDB, Python | 🟡 Deployed (ChromaDB) |
-
-### Pillar 1 — Log Anomaly Detection
-
-Static threshold alerts are binary and fire too late (system is already broken) or too early (noise). A Loki ratio query detects anomalies _relative to a rolling baseline_ — no manual threshold tuning:
-
-```promql
-# Current 5-min error rate as a multiple of the 1-hour rolling baseline
-sum(rate({namespace="apps"} |= "error" [5m]))
-  / sum(rate({namespace="apps"} |= "error" [1h]))
-```
-
-A ratio > 3× indicates the system is behaving abnormally even if the absolute error count is low. Alert at 3×, page at 10×.
-
-**Next step:** Export Loki time-series as feature vectors and apply an IsolationForest model (unsupervised — no labelled training data needed) to detect multi-dimensional log pattern shifts that single-metric PromQL ratios cannot capture alone.
-
-### Pillar 2 — Metric Forecasting (Mimir + Python)
-
-Seven days of Kong request-rate data in Mimir can power a time-series forecast that predicts when traffic will exceed the rate limit _before_ the `429`s start:
-
-```python
-# Query Mimir (Prometheus-compatible API) + Prophet forecast
-import requests, pandas as pd
-from prophet import Prophet
-
-resp = requests.get("http://mimir:9009/prometheus/api/v1/query_range", params={
-    "query": "sum(rate(kong_http_requests_total[5m]))",
-    "start": "now-7d", "end": "now", "step": "5m",
-})
-values = resp.json()["data"]["result"][0]["values"]
-df = pd.DataFrame(values, columns=["ds", "y"])
-df["ds"] = pd.to_datetime(df["ds"].astype(float), unit="s")
-df["y"]  = df["y"].astype(float)
-
-model    = Prophet(changepoint_prior_scale=0.05)
-model.fit(df)
-future   = model.make_future_dataframe(periods=60, freq="5min")
-forecast = model.predict(future)
-# forecast["yhat"] → predicted RPS for next 60 min
-# Alert if forecast["yhat"].max() > rate_limit_per_minute
-```
-
-This is the same Time Series + BI forecasting pattern used in Power BI and Tableau — the only difference is the data source is a Prometheus HTTP endpoint instead of a CSV or database connection.
-
-### Pillar 3 — LLM-Augmented Incident Response
-
-When Grafana fires a 5xx error-rate alert, automatically pull recent error logs from Loki and summarize them with an LLM to produce a plain-English incident summary in seconds.
-
-> **See also:** Pillar 4 (RAG) feeds verified runbook context into this exact LLM prompt — preventing hallucinated "remediation steps" that reference infrastructure this project doesn't have.
-
-```python
-# Flask endpoint — planned addition to Service Dashboard backend
-@app.route("/api/summarize-incident", methods=["POST"])
-def summarize_incident():
-    # 1. Pull last 50 error logs from Loki
-    logs = query_loki('{namespace="apps"} |= "error"', limit=50)
-    # 2. Get Kong 429 + 5xx counts for context
-    kong_stats = query_mimir(
-        'sum by (status) (increase(kong_http_requests_total{status=~"429|5.."}[5m]))'
-    )
-    prompt = (
-        "You are an SRE on-call. Summarize this incident in 3 bullet points, "
-        "identify the likely root cause, and suggest one immediate remediation step.\n"
-        f"Error logs (last 50):\n{logs}\n"
-        f"Kong 429/5xx last 5 min: {kong_stats}"
-    )
-    response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return {"summary": response.choices[0].message.content}
-```
-
-This would surface in the Service Dashboard as an **"AI Incident Summary"** button — one click produces a plain-English summary of what went wrong, drawn from Kong traffic data and application logs.
-
-### Pillar 4 — RAG: Retrieval-Augmented Runbook Response
-
-A bare LLM prompt for Pillar 3 suffers one core failure: _the model has no knowledge of this project's specific configs, routes, or past incidents_. RAG solves this by retrieving relevant context from a local vector store **before** the LLM is called — grounding answers in verified project documentation.
-
-**SRE use cases:**
-- _"What does `KongHighRateLimitHit` mean and what is the runbook?"_ → retrieves from indexed README + alert rule YAML
-- _"Show me the last time service-a latency exceeded 300ms and what the logs said"_ → retrieves from indexed Loki error windows
-- _"What PromQL shows consumer-level rate-limit hits?"_ → retrieves from indexed Grafana dashboard JSON + recording rule definitions
-
-**Architecture:**
-
-```
-┌──────────────────────────┐   embed (MiniLM-L6)   ┌─────────────────────┐
-│  Document Corpus         │ ──────────────────────► │  ChromaDB           │
-│  • README.md             │                         │  namespace: aiops   │
-│  • k8s/**/*.yaml         │                         │                     │
-│  • Loki 24h error logs   │                         │  collections:       │
-│  • Grafana dashboard JSON│                         │  ├─ runbooks        │
-└──────────────────────────┘                         │  ├─ incidents       │
-                                                     │  └─ dashboards      │
-         LLM alert query ────── retrieve top-K ──────┤                     │
-              │                                      └─────────────────────┘
-              ▼
-     augmented prompt → LLM → incident summary with runbook context
-```
-
-**Deployment in this stack:**
-- **Vector store:** ChromaDB `chromadb/chroma:0.6.3` — running in `aiops` namespace, 2 Gi persistent volume, ArgoCD-managed via `k8s/aiops/chromadb/`
-- **Embedding model:** `sentence-transformers/all-MiniLM-L6-v2` — local inference, no external API key required for indexing
-- **Indexer:** CronJob (`rag-indexer`, nightly at 02:00 UTC) — reads `/docs` mount, chunks documents at ~800 chars, upserts into ChromaDB via HTTP API; also scrapes last 24 h of Loki error logs and all Grafana dashboard panel definitions
-- **Retrieval:** standard ChromaDB `/api/v2/collections/{name}/query` — top-5 nearest neighbours injected into the Pillar 3 LLM prompt before the API call
-
-**Verify ChromaDB is running:**
-```bash
-kubectl port-forward svc/chromadb -n aiops 8001:8000
-curl http://localhost:8001/api/v2/heartbeat
-# → {"nanosecond heartbeat": <timestamp>}
-
-# List collections after the first indexer run
-curl http://localhost:8001/api/v2/collections
-# → [{"name":"runbooks",...},{"name":"incidents",...},{"name":"dashboards",...}]
-```
-
-### AIOps Observability Roadmap
-
-| Layer | Status | Description |
-|---|---|---|
-| **Layer 1 — Metrics + Dashboards** | ✅ Active | Kong Prometheus plugin → Alloy → Mimir → Grafana (Kong + Deployment Health dashboards) |
-| **Layer 2 — Prometheus + Alertmanager** | ✅ Deployed | Standalone Prometheus 3.11.0 in `lgtm` ns; Alertmanager with 4 Kong/SLO alert rules; 4 recording rules for Prophet queries |
-| **Layer 3 — Log Anomaly Ratio** | 🔲 Planned | Loki ratio alerting (current/baseline); Grafana managed alert rule |
-| **Layer 4 — IsolationForest** | 🔲 Planned | Python IsolationForest on Loki time-series vectors for multi-dimensional pattern detection |
-| **Layer 5 — Metric Forecast** | 🔲 Planned | Prophet on Mimir 7-day history; pre-emptive alert before rate-limit ceiling hit |
-| **Layer 6 — LLM Response** | 🔲 Planned | Flask + LLM API endpoint wired into Service Dashboard for on-call incident summaries |
-| **Layer 7 — RAG Foundation** | 🟡 Deployed | ChromaDB vector store in `aiops` ns + nightly rag-indexer CronJob (runbooks / incidents / dashboards collections) |
-| **Layer 8 — Synthetic Load AI** | 🔲 Planned | AI-generated realistic traffic simulation (flash sale spike, gradual ramp, sustained load) |
-
-### Prometheus — Deployed (Layer 2)
-
-Standalone Prometheus `v3.11.0` is deployed in the `lgtm` namespace via ArgoCD (`k8s/observability/prometheus/`). It runs **alongside** Mimir — each covering a different role:
-
-| | Prometheus | Mimir |
-|---|---|---|
-| Role | Alert evaluation + recording rules | Long-term metric storage (remote-write target) |
-| Scrapes | Kong `:8100/metrics`, service-a `:8080/metrics`, service-b `:8080/metrics` | Receives from Alloy |
-| Retention | 15 days | Unlimited (object storage backend) |
-| Alert routing | Alertmanager (null receiver; Slack template ready) | — |
-| Recording rules | 4 pre-aggregated metrics for Prophet queries | — |
-
-**Alert rules deployed:**
-
-| Rule | Condition | Severity |
-|---|---|---|
-| `KongHighRateLimitHit` | 429 ratio > 10% of total requests (5 min) | warning |
-| `KongHighUnauthorizedRate` | 401 ratio > 20% of total requests (5 min) | warning |
-| `ServiceHighErrorRate` | 5xx error rate > 1% SLO (5 min) | critical |
-| `ServiceHighLatencyP95` | P95 latency > 300 ms (5 min) | warning |
-
-**Recording rules** (pre-aggregated for Prophet forecast queries):
-- `job:kong_http_requests_total:rate5m`
-- `job:kong_latency_ms:p95_5m`
-- `job:kong_rate_limit_ratio:5m`
-- `job:http_error_rate:rate5m`
-
-**Explore Prometheus:**
-```bash
-kubectl port-forward svc/prometheus-server -n lgtm 9090:80
-# http://localhost:9090 → Status > Targets (verify Kong + services)
-# http://localhost:9090 → Alerts (4 rules in inactive/pending state)
-# http://localhost:9090 → Graph → query: job:kong_rate_limit_ratio:5m
-```
-
-**Ad-hoc POC (transient, no ArgoCD):**
-```bash
-kubectl run prometheus-poc \
-  --image=prom/prometheus:v3.4.0 \
-  --restart=Never -n lgtm \
-  -- --web.enable-lifecycle --storage.tsdb.retention.time=2h
-kubectl port-forward pod/prometheus-poc 9090:9090 -n lgtm
-kubectl delete pod prometheus-poc -n lgtm   # clean up
+.github/
+  workflows/
+    ci.yml              ← lint + unit test + Trivy scan (CI gate)
+    build-images.yml    ← docker build + push to GHCR + post-push Trivy
+    pipeline.yml        ← Terraform plan (PR) + apply (main, approval gate)
+    bootstrap.yml       ← one-time S3 + DynamoDB bootstrap via CloudFormation
+argocd/
+  root-app.yaml         ← App-of-Apps entry point (apply this once)
+codefresh.yml           ← CD promotion: dev → staging → production
+demo/
+  load-generator/       ← k8s Jobs for the 3-phase Kong attack demo
+k8s/
+  aiops/                ← ChromaDB vector store + RAG indexer
+  apps/                 ← service-a, service-b, service-dashboard ArgoCD apps
+  argocd/               ← ArgoCD self-management (values + app)
+  envs/                 ← dev.env / staging.env / production.env (image tags)
+  kong/                 ← Kong gateway (DB-less KIC, JWT, rate limiting)
+  kong-config/          ← KongConsumer + KongPlugin CRs
+  kong-crds/            ← Kong CRD install (sync-wave 0)
+  observability/
+    alloy/              ← DaemonSet collector (pod metrics, node, cAdvisor, logs, traces)
+    grafana/            ← dashboards + values
+    loki/               ← log storage (SingleBinary)
+    mimir/              ← metrics storage (monolithic)
+    prometheus/         ← standalone scrape + Alertmanager + alert/recording rules
+    tempo/              ← trace storage (OTLP)
+src/
+  service-a/            ← Go HTTP API (orders endpoint, Prometheus + OTLP)
+  service-b/            ← Go background worker (jobs, Prometheus + OTLP)
+  service-dashboard/    ← React + Node.js dashboard (load-test UI, JWT helper)
+terraform/
+  bootstrap/            ← S3 + DynamoDB backend provisioning
+  *.tf                  ← EC2, OIDC provider, IAM roles + permission boundaries
 ```
 
 ---
 
-## Memory Budget (t3.medium, 4 GB)
+## 👤 Author
 
-| Component | Request | Limit |
-|---|---|---|
-| K3s + system | ~500 MB | — |
-| ArgoCD (all pods) | ~300 MB | ~512 MB |
-| Loki | ~256 MB | ~512 MB |
-| Mimir | ~384 MB | ~768 MB |
-| Tempo | ~192 MB | ~384 MB |
-| Grafana | ~128 MB | ~256 MB |
-| Alloy | ~128 MB | ~256 MB |
-| service-a + service-b | ~64 MB | ~128 MB |
-| Kong (proxy + KIC) | ~256 MB | ~512 MB |
-| Service Dashboard (Node.js + React) | ~128 MB | ~256 MB |
-| Prometheus + Alertmanager | ~256 MB | ~512 MB |
-| ChromaDB (RAG vector store) | ~256 MB | ~512 MB |
-| **Total requests** | **~2.8 GB** | **~4.6 GB** |
+**Rattanakorn Rerkdee** — SRE / Platform Engineer  
+GitOps · Observability · AI · Cloud Security
 
-A 3 GB swapfile (`vm.swappiness=30`) provides headroom during cold starts. If you hit OOM during a live demo, upgrade with:
-
-```hcl
-# terraform.tfvars
-instance_type = "t3.large"  # 8 GB
-```
-
-Then `terraform apply` — the instance is replaced (EBS is preserved for state).
-
----
-
-## Cost Estimate
-
-| Resource | Monthly cost (approx) |
-|---|---|
-| t3.medium (on-demand, us-east-1) | ~$30 |
-| gp3 30 GB EBS | ~$2.40 |
-| Data transfer (minimal) | ~$1 |
-| **Total** | **~$33/mo** |
-
-Stop the instance when not demoing to reduce costs.  
-Destroy when done: `terraform destroy`.
-
----
-
-## Repository Structure
-
-```
-.
-├── codefresh.yml                 # Codefresh CD — promotion pipeline (dev → staging → production)
-├── .github/
-│   └── workflows/
-│       ├── bootstrap.yml         # One-shot: deploys CFN stack to create S3+DynamoDB backend
-│       ├── pipeline.yml          # Terraform plan (any branch) + apply (main, approval-gated)
-│       └── build-images.yml      # Build + push Go images to GHCR
-├── argocd/
-│   └── root-app.yaml             # App of Apps root application
-├── k8s/
-│   ├── argocd/                   # ArgoCD self-management (sync-wave: -1)
-│   │   ├── argocd-app.yaml       #   ArgoCD Application — manages ArgoCD itself via Helm
-│   │   └── values.yaml           #   ArgoCD Helm values (shared by Terraform + self-mgmt)
-│   ├── observability/
-│   │   ├── loki/                 # Loki app.yaml + values.yaml
-│   │   ├── mimir/                # Mimir app.yaml + values.yaml
-│   │   ├── tempo/                # Tempo app.yaml + values.yaml
-│   │   ├── grafana/              # Grafana app.yaml + values.yaml
-│   │   │   └── dashboards/
-│   │   │       ├── deployment-health-configmap.yaml  # Deployment Health dashboard (multi-source, see Operational Gotchas #5)
-│   │   │       ├── kong-traffic-configmap.yaml       # Kong Traffic & Protection dashboard
-│   │   │       └── tempo-traces-configmap.yaml       # Tempo — Distributed Traces dashboard
-│   │   └── alloy/                # Alloy app.yaml + values.yaml + config.alloy
-│   ├── kong/                     # Kong API Gateway (DB-less mode)
-│   │   ├── app.yaml              #   ArgoCD Application — sync-wave: 1
-│   │   ├── values.yaml           #   NodePort 8000, status 8100, Alloy annotations
-│   │   ├── plugins.yaml          #   KongClusterPlugin (prometheus) + rate-limit + jwt
-│   │   ├── consumer.yaml         #   KongConsumer demo-client + JWT credential secret
-│   │   └── ingress.yaml          #   Ingress /api/orders → service-a, jwt+rate-limit
-│   └── apps/
-│       ├── service-a/            # ArgoCD app + K8s manifests
-│       └── service-b/            # ArgoCD app + K8s manifests
-├── demo/
-│   └── load-generator/           # One-shot K8s Jobs for Kong demo (NOT managed by ArgoCD)
-│       ├── phase1-direct-attack.yaml   # Flood service-a directly — no protection
-│       ├── phase2-kong-unauth.yaml     # Hit Kong without JWT — expect 401s
-│       └── phase3-kong-ratelimited.yaml # Burst with JWT — expect 429 after 60/min
-├── src/
-│   ├── service-a/                # Go HTTP API simulator
-│   │   ├── main.go
-│   │   ├── go.mod
-│   │   └── Dockerfile
-│   ├── service-b/                # Go background worker simulator
-│   │   ├── main.go
-│   │   ├── go.mod
-│   │   └── Dockerfile
-│   └── service-dashboard/        # React + Node.js status dashboard
-│       ├── server.js             #   Express backend (Kubernetes API client)
-│       ├── package.json
-│       ├── Dockerfile           #   Multi-stage: build React, serve with Node.js
-│       ├── .env.example
-│       └── client/              #   React frontend (Vite)
-│           ├── src/
-│           │   ├── App.jsx
-│           │   ├── main.jsx
-│           │   ├── index.css
-│           │   └── components/
-│           │       ├── StatusPanel.jsx
-│           │       └── NavBar.jsx
-│           ├── index.html
-│           ├── package.json
-│           └── vite.config.js
-└── terraform/
-    ├── bootstrap/                # Run ONCE: creates S3 bucket + DynamoDB table (local state)
-    │   ├── main.tf               #   account guard, S3, DynamoDB, scoped bootstrap IAM policy
-    │   ├── cfn-backend.yaml      #   CloudFormation alternative — no local Terraform needed
-    │   ├── variables.tf
-    │   ├── outputs.tf            #   emits bootstrap_policy_arn + backend_config snippet
-    │   └── terraform.tfvars
-    ├── main.tf                   # EC2, OIDC, IAM roles + boundary, SG, SSH key, Secrets Manager
-    ├── variables.tf
-    ├── outputs.tf                # instance_public_ip, ssh_command, iam_role_arn, etc.
-    ├── user-data.sh              # K3s + ArgoCD bootstrap
-    ├── terraform.tfvars          # gitignored — fill with your values
-    └── terraform.tfvars.example  # reference template
-```
-
----
-
-## Idempotency
-
-`user-data.sh` is fully idempotent:
-- Swap creation is guarded by a file-existence check
-- K3s install uses the official idempotent installer (re-running is safe)
-- ArgoCD is installed via `helm upgrade --install --atomic --wait`
-- The root App of Apps is applied with `kubectl apply`
-
-Re-running `terraform apply` with `user_data_replace_on_change = true` will replace the instance only if the user-data template changes. Instance type changes also trigger replacement.
-
----
-
-## CI/CD Split — GitHub Actions + Codefresh
-
-This project uses a deliberate **CI/CD separation**:
-
-| Concern | Tool | File |
-|---|---|---|
-| **CI** — build image, push to GHCR, trigger CD | GitHub Actions | `.github/workflows/build-images.yml` |
-| **CD** — promotion flow, approval gates, env tracking | Codefresh | `codefresh.yml` |
-
-```
-GitHub Push (main)
-    │
-    └─ GitHub Actions (CI) ──────────────────────────────────────────────────┐
-         ├─ docker build + push → ghcr.io/paee45/service-{a,b}:<sha>        │
-         └─ trigger-cd job: POST Codefresh API (IMAGE_TAG=<sha>) ───────────┘
-                                     │
-                          Codefresh (CD Promotion UI)
-                               │
-                    ┌──────────┼──────────────────┐
-                    ▼          ▼                  ▼
-                  dev       staging           production
-               (auto)    (approval gate)   (approval gate
-                                           + git release tag)
-                    │          │                  │
-              commit k8s/  commit k8s/       commit k8s/apps/*/
-              envs/dev.env envs/staging.env  deployment.yaml +
-                                             envs/production.env
-                    │          │                  │
-                    └──────────┴──────────────────┘
-                                     │
-                            ArgoCD auto-sync (<3 min)
-```
-
-Codefresh acts as a **release orchestration layer**, enabling controlled promotion across environments while ArgoCD performs the actual deployment. Promotion is implemented as a **Git change (GitOps), not a rebuild**, ensuring immutability and consistency across environments.
-
-### Codefresh promotion stages
-
-| Stage | Approval | What it commits | Timeout |
-|---|---|---|---|
-| `dev` | Auto | `k8s/envs/dev.env` | — |
-| `staging` | Manual (Codefresh UI) | `k8s/envs/staging.env` | 48 h |
-| `production` | Manual + diff preview | `k8s/apps/*/deployment.yaml` + `k8s/envs/production.env` + `release-<sha>` git tag | 72 h |
-
-The `k8s/envs/*.env` files are environment pins — they record exactly what image is running where and who approved it. ArgoCD watches `k8s/apps/*/deployment.yaml` (updated on production promote); the `.env` files serve as the audit trail.
-
-### One-time Codefresh setup
-
-1. **Pipeline variable** — Pipelines → `codefresh.yml` → Variables
-   - `GITHUB_TOKEN` (secret) — PAT with `repo` scope, used for git push + release tag
-
-2. **Trigger** from GitHub Actions — already implemented as the `trigger-cd` job in `.github/workflows/build-images.yml`:
-   - Runs after both matrix builds complete (`needs: [build]`)
-   - Only fires on `main` branch pushes
-   - Sends `IMAGE_TAG=<7-char sha>` to the Codefresh API
-   - Fails the workflow if Codefresh returns a non-2xx response
-
-   GitHub secret required: `CODEFRESH_API_TOKEN` (Codefresh → User Settings → API Keys)
-
-3. **Or run manually** — Codefresh UI → Run Pipeline → set `IMAGE_TAG=<sha>`
-
----
-
-## ArgoCD Bootstrap Architecture
-
-ArgoCD is bootstrapped in two phases — **Terraform once, ArgoCD forever**:
-
-### Phase 1 — Initial install (Terraform, runs once)
-
-`terraform/user-data.sh` runs on first EC2 boot and:
-
-1. Installs K3s
-2. Installs ArgoCD via `helm upgrade --install --atomic` using `k8s/argocd/values.yaml`
-3. Applies `argocd/root-app.yaml` — the App of Apps root
-
-### Phase 2 — Self-management (ArgoCD, ongoing)
-
-Once the root app is synced, ArgoCD discovers `k8s/argocd/argocd-app.yaml`:
-
-```yaml
-# k8s/argocd/argocd-app.yaml
-# sync-wave: -1 → runs before all other apps
-sources:
-  - chart: argo-cd                            # official Helm chart
-    targetRevision: "9.4.17"
-    valueFiles: [$values/k8s/argocd/values.yaml]
-  - repoURL: ...gitops-sre-demo.git           # values source
-    ref: values
-```
-
-From this point, **any change to `k8s/argocd/values.yaml` is automatically applied by ArgoCD**. No manual `helm upgrade` needed.
-
-```
-                  ┌─────────────────────────────────────────┐
-  Git push  ──►  │  root-app  (path: k8s)                  │
-                  │    │                                     │
-                  │    ├─► argocd-app   (sync-wave: -1)     │
-                  │    ├─► grafana-app  (lgtm ns)           │
-                  │    ├─► loki-app                         │
-                  │    ├─► mimir-app                        │
-                  │    ├─► tempo-app                        │
-                  │    ├─► alloy-app                        │
-                  │    ├─► service-a-app (apps ns)          │
-                  │    └─► service-b-app                    │
-                  └─────────────────────────────────────────┘
-```
-
-The `sync-wave: -1` annotation on `argocd-app` ensures ArgoCD finishes reconciling its own config before syncing any child applications.
-
----
-
-## Deployment Health Dashboard
-
-A custom Grafana dashboard (`k8s/observability/grafana/dashboards/deployment-health-configmap.yaml`) is provisioned automatically via the Grafana sidecar — no Grafana restart needed.
-
-The Grafana sidecar watches all namespaces for ConfigMaps labelled `grafana_dashboard: "1"`. The dashboard appears under **Dashboards → Browse → SRE Demo** within ~30 seconds of ArgoCD syncing.
-
-> **Multi-source ArgoCD pattern (commit `620ec64`):** Dashboard ConfigMaps live in `k8s/observability/grafana/dashboards/` but are **not** applied by the Grafana Helm chart itself. The `grafana` ArgoCD Application requires a third `path:` source pointing directly at that directory. Without it, the ConfigMaps exist in git but are never created as Kubernetes objects — the sidecar label-watch never discovers them. A common gotcha with mixed Helm + raw-manifest applications in ArgoCD.
->
-> ```yaml
-> # k8s/observability/grafana/app.yaml — three sources
-> sources:
->   - repoURL: https://grafana.github.io/helm-charts
->     chart: grafana                                     # 1. Helm chart
->   - repoURL: https://github.com/paee45/gitops-sre-demo.git
->     ref: values                                        # 2. Values reference
->   - repoURL: https://github.com/paee45/gitops-sre-demo.git
->     path: k8s/observability/grafana/dashboards         # 3. Raw ConfigMaps ← required
-> ```
-
-### ⭐ Deployment validation (SRE focus)
-
-Unlike typical demos that stop at "deployment succeeded", this project validates every release using:
-
-- Error rate (5xx)
-- Latency (P95)
-- Pod restart spikes
-- SLO compliance
-
-A deployment is only considered successful if these remain within SLO.
-
-### Dashboard layout
-
-| Row | Panels | What it answers |
-|---|---|---|
-| 🚀 Deployment Overview | Deploy Frequency · Sync Success % · Sync Failures · Apps Healthy | "How often do we deploy, and is it working?" |
-| (full-width) | Sync Events Over Time (bar, Succeeded vs Failed) | Deploy cadence history with annotation markers |
-| ⚡ Deployment Performance | Reconcile Duration avg · Sync Duration P95 | "How long does a deployment take?" |
-| 🔥 Post-Deploy Impact | HTTP Error Rate 5xx · Latency P95 | "Did the deployment break anything?" |
-| 🔄 Kubernetes Stability | Pod Restarts · Running Pods per namespace | "Is the cluster stable after deploy?" |
-| 🎯 SLO Compliance | SLO gauge: Error rate < 1% · SLO gauge: P95 < 300 ms | "Are we meeting our SLOs?" |
-
-### Key PromQL queries
-
-```promql
-# Deployment frequency (last hour)
-sum(increase(argocd_app_sync_total[1h]))
-
-# Sync success rate
-100 * sum(increase(argocd_app_sync_total{phase="Succeeded"}[1h]))
-    / clamp_min(sum(increase(argocd_app_sync_total[1h])), 1)
-
-# Reconcile duration (avg per app)
-sum by (app) (rate(argocd_app_reconcile_duration_seconds_sum[5m]))
-  / sum by (app) (rate(argocd_app_reconcile_duration_seconds_count[5m]))
-
-# HTTP 5xx error rate
-sum(rate(http_requests_total{status=~"5.."}[5m])) by (service_name)
-
-# Latency P95
-histogram_quantile(0.95,
-  sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service_name))
-
-# Pod restarts
-sum by (pod, namespace) (
-  increase(kube_pod_container_status_restarts_total{namespace=~"$namespace"}[5m]))
-```
-
-### Dashboard variables
-
-| Variable | Query | Use |
-|---|---|---|
-| `$app` | `label_values(argocd_app_info, name)` | Filter all panels to one ArgoCD app |
-| `$namespace` | `label_values(kube_pod_info, namespace)` | Filter pod/restart panels |
-
-### Simulating a failure (demo script)
-
-```bash
-# 1. SSH into the node
-terraform -chdir=terraform output -raw ssh_command | bash
-
-# 2. Trigger pod restarts on service-a
-kubectl -n apps rollout restart deployment/service-a
-
-# 3. Watch in Grafana → Deployment Health Dashboard
-#    - Pod Restarts panel spikes immediately
-#    - ArgoCD self-heals (selfHeal:true) → Sync Events shows a Succeeded bar
-#    - Error Rate + Latency may spike briefly during rollout
-```
-
----
-
-## Kong API Gateway — Traffic Control Layer
-
-Kong runs as a DB-less Kubernetes Ingress Controller (KIC), deployed via ArgoCD at sync-wave 1. All Kong configuration is stored as Kubernetes CRDs — no database, no out-of-band changes.
-
-### Architecture
-
-```
-  External / load-generator
-          │
-          ▼
-   [ EC2:8000 (NodePort) ]
-          │
-          ▼
-  Kong Proxy (kong ns)
-    ├─ jwt-orders plugin     → 401 Unauthorized (no/invalid JWT)
-    ├─ rate-limit-orders     → 429 Too Many Requests (> 60 req/min)
-    └─ prometheus-global     → metrics at :8100/metrics (scraped by Alloy)
-          │
-    (passes through)
-          ▼
-  service-a (apps ns) :8080/api/orders
-    ├─ OTEL traces → Tempo
-    ├─ /metrics    → Mimir (via Alloy)
-    └─ stdout logs → Loki (via Alloy)
-```
-
-### Configuration (all GitOps, applied by ArgoCD)
-
-| File | What it does |
-|---|---|
-| `k8s/kong/app.yaml` | ArgoCD Application — installs `kong/kong:2.38.0` into `kong` ns (sync-wave 1) |
-| `k8s/kong/values.yaml` | DB-less mode, NodePort 8000, status endpoint 0.0.0.0:8100 for Alloy scraping |
-| `k8s/kong/plugins.yaml` | `KongClusterPlugin` prometheus · `KongPlugin` rate-limit (60/min) · `KongPlugin` jwt |
-| `k8s/kong/consumer.yaml` | `KongConsumer` demo-client with HS256 JWT credential |
-| `k8s/kong/ingress.yaml` | Ingress `ingressClassName: kong` — routes `/api/orders` → service-a:8080 |
-
-### 3-Phase Demo
-
-> **SRE insight:** `429` = system is protecting itself. `5xx` = system is failing. They look the same on a latency graph but mean opposite things.
-
-#### Phase 1 — No Gateway (baseline failure)
-
-```bash
-# Direct attack: 500 concurrent requests hit service-a with no protection
-kubectl apply -f demo/load-generator/phase1-direct-attack.yaml
-
-# Expect: error rate spikes in Grafana → Deployment Health Dashboard
-# service-a's 4% synthetic error rate compounds under load
-```
-
-#### Phase 2 — Kong blocks unauthenticated traffic
-
-```bash
-# Same flood, but through Kong without a JWT
-kubectl apply -f demo/load-generator/phase2-kong-unauth.yaml
-
-# Expect: 100% 401 responses — service-a receives ZERO requests
-# Check: kubectl logs -l job-name=load-phase2-kong-unauth -n tools
-```
-
-#### Phase 3 — Rate limiting preserves SLOs
-
-```bash
-# 0. Verify services are healthy before running the demo
-kubectl wait --for=condition=ready pod -l app=service-a -n apps --timeout=60s
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=kong -n kong --timeout=60s
-
-# 1. Generate a JWT for the demo consumer
-python3 -c "
-import base64, hmac, hashlib, json, time
-header = base64.urlsafe_b64encode(json.dumps({'alg':'HS256','typ':'JWT'}).encode()).rstrip(b'=').decode()
-payload = base64.urlsafe_b64encode(json.dumps({'iss':'demo-client','exp':int(time.time())+3600}).encode()).rstrip(b'=').decode()
-msg = f'{header}.{payload}'
-sig = base64.urlsafe_b64encode(hmac.new(b'gitops-sre-demo-jwt-secret-changeme', msg.encode(), hashlib.sha256).digest()).rstrip(b'=').decode()
-print(f'{msg}.{sig}')
-"
-
-# 2. Store the token and fire burst load
-kubectl create secret generic demo-jwt -n tools --from-literal=token="<PASTE_TOKEN>"
-kubectl apply -f demo/load-generator/phase3-kong-ratelimited.yaml
-
-# Expect: first 60 req/min pass (200), remainder get 429
-# Open Grafana → Kong Traffic & Protection dashboard:
-#   - 429 rate spikes (orange) = protection is active
-#   - 5xx rate stays flat (green) = SLO preserved
-#   - service-a P95 latency stays stable
-```
-
-### FAQ
-
-**Q: Are service-a and service-b custom apps or open-source?**  
-Custom Go apps. `service-a` is an HTTP API with a synthetic load generator, 4% error rate, 10–800 ms latency jitter, OTEL tracing, and Prometheus metrics — purpose-built as a realistic demo target. `service-b` is a background worker with no HTTP API (not proxied by Kong). No external tool needed to generate traffic; `service-a` creates it internally.
-
-**Q: Does the demo need an external caller to hit the API?**  
-No. `service-a` has a built-in load generator (1–5 requests every 2 seconds). The `demo/load-generator/` Jobs provide controlled burst scenarios for the 3-phase demo.
-
-**Q: For dev/staging/production promotion, do we use separate namespaces?**  
-The current setup uses a single cluster with `apps` namespace. The production-ready pattern is: `apps-dev` / `apps-staging` / `apps-production` namespaces with Kustomize overlays per environment. This is listed in Future Improvements — implementing it requires a Kustomize refactor of `k8s/apps/` but does not change the GitOps/ArgoCD plumbing.
-
-**Q: Is there a click-to-test UI for Kong JWT auth and rate limiting?**  
-Yes — the **Service Dashboard** at `http://localhost:8090` has a **JWT Generator tab** (one-click HS256 token, copy/paste ready) and a **Load Tests tab** that walks through all 3 Kong demo phases with step-by-step instructions. No `kubectl` or `curl` required for the basic demo flow.
-
-### Kong Manager & Observability
-
-Kong provides an official UI for administrative tasks, but monitoring and analytics are handled separately depending on the version in use.
-
-#### Kong Manager (Official Admin UI)
-
-Kong Manager is the graphical user interface for **Kong Gateway Enterprise**. It handles:
-
-- Configuring Services, Routes, and Upstreams
-- Managing Plugins (rate-limiting, JWT, Prometheus)
-- Consumer and credential management
-- RBAC and Workspaces
-
-> **This project uses Kong Gateway open-source** in DB-less mode via the Kubernetes Ingress Controller (KIC). All configuration lives in Git as Kubernetes CRDs (`KongPlugin`, `KongConsumer`, `KongClusterPlugin`). Kong Manager is a Kong Enterprise feature and is not available in the open-source chart — GitOps via ArgoCD is the config management layer.
-
-#### Monitoring & Analytics (Prometheus + Grafana)
-
-For real-time Kong visibility — RPS, 401/429 rates, upstream latency distributions — the standard approach is Kong's built-in Prometheus metrics endpoint combined with a Grafana dashboard. Kong does not include a built-in analytics UI in the open-source version.
-
-| Metric | Exposed at | Scraped by | Stored in | Dashboard |
-|---|---|---|---|---|
-| `kong_http_requests_total` | Kong `:8100/metrics` | Grafana Alloy | Mimir | Kong — Traffic & Protection |
-| `kong_latency_ms_bucket` | Kong `:8100/metrics` | Grafana Alloy | Mimir | Kong — Traffic & Protection |
-| `kong_bandwidth_bytes` | Kong `:8100/metrics` | Grafana Alloy | Mimir | Kong — Traffic & Protection |
-
-The `prometheus` `KongClusterPlugin` (in `k8s/kong/plugins.yaml`) enables the Kong metrics endpoint. Alloy discovers it via pod annotations and remote-writes to Mimir. Grafana queries Mimir with PromQL — full observability path with no standalone Prometheus required.
-
-**To view Kong analytics:** `http://localhost:3000` → **Dashboards → Kong — Traffic & Protection**  
-Panels: RPS by status code · 401/429 share of total traffic · upstream P95 latency · bandwidth.
-
-> **Prometheus compatibility:** Mimir is fully Prometheus API-compatible. Any tool that queries Prometheus (Alertmanager, Python scripts, recording-rule evaluators) can be pointed at `http://mimir.lgtm.svc:9009/prometheus` without code changes. See [AIOps Strategy](#aiops-strategy--ai-powered-sre) for how this enables metric forecasting from historical Kong data.
-
----
-
-## Service Dashboard — Status & Monitoring UI
-
-A **React + Node.js web app** that provides real-time visibility into platform components and quick access to key resources.
-
-### Features
-
-| Feature | Description |
-|---|---|
-| **📊 Status Tab** | Real-time health check of Kong, service-a/b, Grafana, Loki, Mimir, Tempo, Alloy, and ArgoCD with color-coded cards |
-| **🔐 JWT Generator Tab** | One-click JWT token generation for Kong demo (HS256, 1-hour expiry) — copy/paste into Phase 3 load test |
-| **🔗 Endpoints Tab** | Quick links to Kong (proxy/admin/metrics), services, Grafana, ArgoCD — plus copy/paste kubectl debugging commands |
-| **⚡ Load Tests Tab** | 3-phase demo orchestration UI with step-by-step instructions and links to Grafana dashboards |
-| **Token Auth** | Bearer token authentication (configurable via `dashboard-secret`) |
-| **Auto-refresh** | Status updates every 10 seconds during live monitoring |
-
-### Accessing the Dashboard
-
-**On EC2 (production):**
-```bash
-http://<public-ip>:8090
-```
-
-**Local k3d:** The service is `ClusterIP:3000` — use port-forward:
-```bash
-KUBECONFIG=~/.kube/ai-sandbox/config kubectl port-forward svc/service-dashboard -n apps 8090:3000
-# then open http://localhost:8090
-```
-
-**Default token:**
-```
-gitops-sre-demo-token-changeme
-```
-
-### Deployment
-
-Deployed via ArgoCD at `k8s/apps/service-dashboard/`:
-- **Image:** `ghcr.io/paee45/service-dashboard:latest` (built from `src/service-dashboard/`)
-- **Port:** 3000 (ClusterIP); exposed as 8090 on EC2 via NodePort or port-forward locally
-- **Replicas:** 1
-- **Auth:** RBAC ClusterRole for reading pod/deployment status across all namespaces
-- **Token:** Stored in `dashboard-secret` in the `apps` namespace
-- **Frontend:** React app (Vite) compiled into `client/dist/`, served by Express backend
-
-### Building Locally
-
-```bash
-cd src/service-dashboard
-
-# Install dependencies (both backend + frontend)
-npm install
-cd client && npm install && cd ..
-
-# Development (with live reload)
-npm run dev            # Backend on :3000 + frontend proxy
-
-# Production build
-npm run build          # Builds React, creates dist/
-npm run build:all      # Build + start Node.js server on :3000
-
-# Docker build (multi-stage: React → Node.js)
-docker build -t service-dashboard:latest .
-docker run -p 3000:3000 service-dashboard:latest
-```
-
-### API Endpoints
-
-| Endpoint | Method | Auth | What it returns | Use case |
-|---|---|---|---|---|
-| `/api/health` | GET | None | `{ status: "ok" }` | Liveness/readiness probe |
-| `/api/status` | GET | Token | Cluster component status (kong, services, observability stack) | Status tab: real-time pod/deployment health |
-| `/api/endpoints` | GET | Token | Kong proxy/admin/metrics URLs, direct nodeIP discovery | Endpoints tab: automatic URL generation |
-| `/api/jwt-generate` | POST | Token | `{ token: "...", expiresIn: 3600 }` | JWT Generator tab: on-demand token creation |
-| `/api/deploy-load-test/:phase` | POST | Token | `{ command: "kubectl apply -f demo/load-generator/..." }` | Load Tests tab: phase deployment instructions |
-| `/api/pods/:namespace` | GET | Token | Pod list with status/restarts/ready | Debugging: per-namespace pod visibility |
-| `/api/kong-metrics` | GET | Token | Kong NodePort and metrics endpoint | Dashboard: Kong connectivity check |
-
----
-
-## Operational Gotchas
-
-Production-discovered issues and their GitOps fixes. Useful for anyone running this stack locally with k3d or reproducing it on EC2.
-
-### 1. Mimir chart 6.0.6 — `push_grpc_method_enabled` defaults to `false`
-
-**Symptom:** `mimir-ingester-0` enters `CrashLoopBackOff`. Logs show a config parse error around the ingester gRPC settings.
-
-**Root cause:** Mimir Helm chart 6.0.6 injects `push_grpc_method_enabled: false` into the generated ConfigMap. This field is only valid when `ingest_storage.enabled: true`. Without that flag, Mimir rejects its own generated config at startup.
-
-**Fix (commit `eab332e`):**
-```yaml
-# k8s/observability/mimir/values.yaml
-mimir:
-  structuredConfig:
-    ingester:
-      push_grpc_method_enabled: true   # override chart default of false
-      ring:
-        replication_factor: 1
-```
-
----
-
-### 2. Kong chart 2.38.0 — missing RBAC for `KongCustomEntity`
-
-**Symptom:** `kong-ingress-controller` container in `CrashLoopBackOff`. RBAC error: `kongcustomentities.configuration.konghq.com` not permitted for the `kong-kong` ServiceAccount.
-
-**Root cause:** The Kong chart's generated ClusterRole only covers CRDs shipped with the chart. Manually-added CRDs like `KongCustomEntity` are not included — the chart has no awareness of them.
-
-**Fix (commit `2311f4d`):** Supplementary ClusterRole + ClusterRoleBinding in `k8s/kong-crds/rbac-custom-entity.yaml`:
-```yaml
-rules:
-  - apiGroups: ["configuration.konghq.com"]
-    resources: ["kongcustomentities"]
-    verbs: ["get", "list", "watch"]
-```
-
----
-
-### 3. k3d + `limit_by: ip` — rate-limit counter silently split across nodes
-
-**Symptom:** Rate limit of 60 req/min appears not to work — requests continue well beyond 60 before returning `429`.
-
-**Root cause:** k3d's klipper-lb (SNAT) routes incoming requests through one of 3 node IPs (server-0, agent-0, agent-1) at the OS level. With `limit_by: ip`, Kong creates a separate counter _per source IP_, giving each node its own 60 req/min budget. Effective rate limit = 60 × 3 nodes = **180 requests** before any single counter trips.
-
-**Fix (commit `7a888d8`):** Use `limit_by: consumer` — tracks rate limits per authenticated JWT consumer identity, a single counter regardless of which k3d node handled the request:
-```yaml
-# k8s/kong/plugins.yaml
-config:
-  minute: 60
-  limit_by: consumer   # was: ip — splits counter via k3d SNAT, effective limit becomes 180
-```
-
----
-
-### 7. Service Dashboard — `ClusterIP` not reachable via k3d port mapping
-
-**Symptom:** `curl http://localhost:8090` → `000 Connection refused`. Pod is `Running`, k3d cluster was created with `-p "8090:8090@loadbalancer"`.
-
-**Root cause:** k3d's klipper-svclb only activates for `LoadBalancer`-type services. `service-dashboard` is `ClusterIP:3000` — the `8090` port mapping has nothing to forward to.
-
-**Fix (local k3d):**
-```bash
-KUBECONFIG=~/.kube/ai-sandbox/config kubectl port-forward svc/service-dashboard -n apps 8090:3000
-```
-
-**On EC2:** The service is fronted by a NodePort (`8090`) exposed in the security group — accessible directly at `http://<public-ip>:8090`.
-
----
-
-### 4. Grafana service type — `ClusterIP:80` invisible to k3d port mapping
-
-**Symptom:** `curl http://localhost:3000` → `000 Connection refused`. Grafana pod is `Running` and service exists.
-
-**Root cause:** k3d port mappings (`-p "3000:3000@loadbalancer"`) are forwarded through klipper-svclb, which only activates for `LoadBalancer` service types. A `ClusterIP` service is unreachable from the host even with a matching port declaration at cluster creation time.
-
-**Fix (commit `d5411f1`):**
-```yaml
-# k8s/observability/grafana/values.yaml
-service:
-  type: LoadBalancer
-  port: 3000
-  targetPort: 3000
-```
-
----
-
-### 6. OTLP exporter endpoint — `host:port` only, no URL scheme
-
-**Symptom:** All traces silently dropped. Service logs show:
-```
-traces export: parse "http://http:%2F%2Falloy.lgtm.svc.cluster.local:4318/v1/traces": invalid URL escape "%2F"
-```
-
-**Root cause:** `otlptracehttp.WithEndpoint()` takes **`host:port` only** — not a full URL. When `OTEL_EXPORTER_OTLP_ENDPOINT` contains the `http://` scheme prefix, the SDK constructs `http://http://host:port/v1/traces`, producing a double-scheme URL that fails to parse. Traces are dropped with no retry.
-
-**Fix (commit `8c4326a`):**
-```yaml
-# k8s/apps/service-a/deployment.yaml  (same for service-b)
-env:
-  - name: OTEL_EXPORTER_OTLP_ENDPOINT
-    value: "alloy.lgtm.svc.cluster.local:4318"   # host:port — NO http:// prefix
-```
-
----
-
-### 5. Grafana dashboard ConfigMaps — ArgoCD multi-source required
-
-**Symptom:** `kubectl get configmap -A -l grafana_dashboard=1` → no results. Grafana sidecar never discovers the custom dashboards.
-
-**Root cause:** The `grafana` ArgoCD Application had only two sources (Helm chart + `ref: values`). The `dashboards/` subdirectory of raw ConfigMap manifests was never synced — the files exist in git but ArgoCD never applies them as Kubernetes objects.
-
-**Fix (commit `620ec64`):** Third source in `k8s/observability/grafana/app.yaml`:
-```yaml
-sources:
-  - repoURL: https://grafana.github.io/helm-charts
-    chart: grafana
-  - repoURL: https://github.com/paee45/gitops-sre-demo.git
-    ref: values
-  - repoURL: https://github.com/paee45/gitops-sre-demo.git
-    path: k8s/observability/grafana/dashboards   # ← ConfigMaps as K8s objects
-```
-
----
-
-## Design Tradeoffs
-
-| Decision | Choice | Tradeoff |
-|---|---|---|
-| **Single EC2 vs EKS** | Single EC2 (~$33/mo) | Cost and simplicity; architecture is EKS-ready without code changes |
-| **K3s vs full Kubernetes** | K3s | Faster bootstrap, lighter footprint; full Kubernetes API compatibility maintained |
-| **Monolithic LGTM stack** | Single-binary Loki/Mimir/Tempo | Reduced operational overhead; tradeoff: limited horizontal scalability |
-| **NodePort exposure** | NodePort 32080 (ArgoCD), 3000 (Grafana), 8000 (Kong) | Simpler than ALB/Ingress for demo; not production-grade networking |
-| **Kong DB-less mode** | All config via K8s CRDs, no Postgres | Pure GitOps; tradeoff: no Kong Manager UI (Enterprise feature), no runtime config changes. Requires supplementary RBAC for custom CRDs (see [Operational Gotchas](#operational-gotchas) #2) |
-| **CI/CD split** | GitHub Actions (CI) + Codefresh (CD) | Clear separation of concerns; CI tooling is swappable without touching promotion logic |
-
----
-
-## Future Improvements
-
-- **Progressive delivery** — canary / blue-green rollouts using Argo Rollouts
-- **Multi-cluster / multi-region** — separate clusters per environment with ArgoCD ApplicationSets
-- **Namespace-per-environment** — `apps-dev` / `apps-staging` / `apps-production` with Kustomize overlays for true environment isolation
-- **External secret management** — integration with HashiCorp Vault or AWS Secrets Manager via External Secrets Operator
-- **JWT secret rotation** — replace demo HS256 static secret with external secret management and automated rotation
-- **AIOps — Log anomaly detection** — Loki ratio alerting + Python IsolationForest model on log-pattern vectors (Layer 3)
-- **AIOps — Metric forecasting** — Prophet model on Mimir 7-day history + Prometheus recording rules; pre-emptive alert before rate-limit ceiling hit (Layer 5)
-- **AIOps — LLM incident response** — Flask + LLM API endpoint in Service Dashboard for one-click on-call incident summarization (Layer 6); RAG context injection from ChromaDB (Layer 7 already deployed)
-- **RAG indexer git-sync** — replace `emptyDir` in `rag-indexer` CronJob with a [git-sync](https://github.com/kubernetes/git-sync) sidecar so the document corpus reflects the live HEAD without a manual re-trigger
-- **AI traffic simulation** — Python/Flask synthetic traffic generator simulating realistic patterns (flash sale spike, gradual ramp, sustained load) for Kong autoscale and rate-limit stress-testing (Layer 8)
-- **Slack/PagerDuty alert routing** — wire Prometheus Alertmanager null receiver to a real Slack webhook or OpsGenie integration key via Kubernetes Secret
-
----
-
-## Showcase
-
-> For hiring managers and technical reviewers
-
-### ⭐ Key idea
-
-A deployment is only considered successful if:
-- it is **synced** (ArgoCD)
-- AND system behavior remains **healthy** (Grafana SLOs)
-
-This demo focuses on **safe and observable delivery**, not just deployment automation.
-
-> This project focuses on **safe delivery, not just fast delivery**.
-
-### Live demo
-
-| | |
-|---|---|
-| **Grafana** | `http://<PUBLIC_IP>:3000` — user: `admin` / pass: see below; also anonymous viewer |
-| **ArgoCD** | `http://<PUBLIC_IP>:32080` — user: `admin` / pass: see SSH retrieval above |
-| **Kong Proxy** | `http://<PUBLIC_IP>:8000` — JWT required for `/api/orders`; 404 at `/` is expected |
-| **Service Dashboard** | `http://<PUBLIC_IP>:8090` — token: `gitops-sre-demo-token-changeme` |
-
-**Retrieve credentials:**
-```bash
-# ArgoCD admin password
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
-
-# Grafana admin password
-kubectl -n lgtm get secret grafana -o jsonpath="{.data.admin-password}" | base64 -d
-```
-| **Public IP** | Set after `terraform apply` — run `terraform -chdir=terraform output instance_public_ip` |
-
-> **Note:** The EC2 instance is stopped when not actively demoing to reduce cost (~$33/mo running).  
-> Email or message me to request a live session — I'll start it up in < 5 minutes.
-
-### What this demonstrates
-
-| Capability | How it's shown | Why it matters |
-|---|---|---|
-| **GitOps delivery** | Push to `main` → ArgoCD sync in < 3 min | Zero-touch deploy, full audit trail in Git |
-| **IaC safety** | OIDC (no static keys), permission boundaries, account guard | AWS security best practices |
-| **Observability** | LGTM stack auto-provisioned, correlated logs/metrics/traces | Production-grade o11y from day 1 |
-| **Deployment health** | Custom Grafana dashboard with SLO gauges | Validates every deploy, not just "Synced" |
-| **Self-healing** | ArgoCD `selfHeal: true` — manual drift auto-corrected | Demonstrates GitOps reconciliation |
-| **CI/CD separation** | GitHub Actions (build+push) → Codefresh (promote) — decoupled by image tag | CI-agnostic GitOps; swap CI without touching promotion logic |
-| **ArgoCD self-mgmt** | ArgoCD manages its own Helm config via app-of-apps | No config drift after initial bootstrap |
-| **API Gateway (Kong)** | DB-less KIC with JWT auth + rate limiting — 3-phase live demo | Traffic shaping: 429 = protection, 5xx = failure. SLO preserved under attack |
-| **Platform Dashboard** | React UI showing real-time component health, JWT generator, Kong load-test UI | Operator-friendly; no Kubernetes CLI needed for the demo |
-| **AIOps Framework** | Three-pillar strategy: Log Anomaly Ratio alerting, Metric Forecasting (Prophet), LLM Incident Response | Converts Data Science / AI Engineering background into production SRE practices |
-| **Cost-aware** | Everything runs on a single t3.medium with resource limits | Shows awareness of real-world constraints |
-
-### Demo walkthrough script (5 minutes)
-
-```
-1. Open ArgoCD UI → show all apps Synced + Healthy (App of Apps tree)
-
-2. Trigger a deploy:
-   git commit --allow-empty -m "demo: trigger sync"
-   git push origin main
-   → GitHub Actions builds + pushes image (or Codefresh in parallel)
-
-3. Open Grafana → Deployment Health Dashboard
-   → "Deploy Frequency" stat increments
-   → "Sync Events Over Time" shows a green bar
-   → Walk through Error Rate and Latency panels
-   → Point to SLO gauges: "A deploy isn't complete until these are green"
-
-4. Simulate failure:
-   kubectl -n apps rollout restart deployment/service-a
-   → Pod Restarts panel spikes
-   → ArgoCD self-heals → another green sync bar appears
-
-5. Show ArgoCD manages itself:
-   "If I change k8s/argocd/values.yaml and push, ArgoCD updates its own config
-    with no manual helm upgrade — true GitOps for the GitOps controller itself."
-```
-
-### Engineering decisions worth discussing
-
-- **Why no static credentials anywhere?** OIDC + permission boundaries means a leaked token can't do anything useful outside this project's resources.
-- **Why Codefresh + GitHub Actions?** Shows CI-agnosticism — the GitOps promotion pattern works the same regardless of CI platform. The image tag update + ArgoCD sync decouples CI from CD.
-- **Why a single EC2 instead of EKS?** Cost-conscious demo: full production observability stack for ~$33/mo. The k3s → EKS migration path is straightforward (update kubeconfig, add node groups, nothing else changes).
-- **Why LGTM vs Prometheus/Grafana only?** Logs, metrics, and traces in one unified stack enables trace-to-logs and trace-to-metrics correlation — one click from a slow trace to the exact log line and the metric that degraded.
+> Not just deployment — a complete platform for **building, operating, and debugging** production cloud systems.

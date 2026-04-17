@@ -1,4 +1,4 @@
-# 🤖 AI-Assisted GitOps SRE Platform
+# 🤖 AI-Powered GitOps & SRE Framework (EKS/k8s, Terraform, ArgoCD, AIOps)
 
 **gitops-sre-demo** — a personal side project exploring what it looks like when AI is a first-class citizen in a real SRE/GitOps platform, not an add-on.
 

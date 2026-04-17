@@ -17,15 +17,27 @@ Everything runs on a **single k3d cluster** (or an EC2 t3.medium if you want it 
 
 ---
 
-## ✨ The Cool Bits
+## ✨ What Makes This Interesting
 
-- 🔁 **GitOps all the way down** — ArgoCD App-of-Apps, zero manual `kubectl apply` after initial bootstrap
-- 🧪 **CI gate that actually blocks bad code** — `golangci-lint` + `go test -race` + Trivy scan; image push is gated on CI success via `workflow_run`
-- 🚀 **Multi-stage CD** — GitHub Actions → Codefresh (auto-promote to dev, human approval for staging & prod)
-- 🛡️ **Kong 3-phase attack demo** — hit the service directly (chaos), through Kong without a token (all 401s), and with a valid JWT hitting rate limits (429 after 60 req/min). Watch it all live in Grafana
-- 📊 **LGTM observability** — Mimir (metrics) + Loki (logs) + Tempo (traces) + Grafana; click a trace → jump to the exact log line
-- 🤖 **AI SRE layer (early stage)** — ChromaDB vector store running in the cluster, indexed from runbooks, manifests, and alert rules; designed to give an LLM real context when answering *"what's broken and why?"*
-- 🔒 **No static secrets** — GitHub Actions uses OIDC JWT tokens; AWS creds are 15-minute STS, never on disk
+### 🤖 The AI SRE Layer (the whole point)
+- **RAG-grounded incident analysis** — ChromaDB vector store in the cluster, indexed nightly from runbooks, manifests, alert rules, and Grafana dashboard definitions
+- **No hallucination by design** — the LLM gets retrieved context chunks alongside the alert; it can't make up facts about *your* system
+- **Local-first** — `sentence-transformers/all-MiniLM-L6-v2` does embeddings in-cluster, no external API key needed for the foundation layer
+- **Alertmanager → LLM webhook** *(planned)* — when an alert fires, it automatically queries ChromaDB and calls the LLM for a structured incident report
+- **Ollama integration** *(planned)* — local `llama3.2:3b` in the cluster so the full AI loop works with zero external dependencies
+
+### 📊 Observability Foundation (what the AI reads from)
+- **LGTM stack** — Mimir (metrics) + Loki (logs) + Tempo (traces) + Grafana; full correlation: click a trace → jump to the exact log line
+- **Structured signals** — services emit JSON logs with `traceID` field, OTLP spans, and labelled Prometheus metrics; everything is queryable
+- **4 alert rules** — `KongHighRateLimitHit`, `KongHighUnauthorizedRate`, `ServiceHighErrorRate`, `ServiceHighLatencyP95` — each maps to a runbook chunk in ChromaDB
+
+### 🔁 GitOps + CI/CD (the delivery backbone)
+- **CI gate** — `golangci-lint` + `go test -race` + Trivy scan; image push gated on CI success via `workflow_run`
+- **Multi-stage CD** — GitHub Actions → Codefresh (auto-promote to dev, human approval for staging & prod)
+- **ArgoCD App-of-Apps** — zero manual `kubectl apply` after initial bootstrap; `selfHeal: true`
+
+### 🛡️ API Protection Demo (the fun bit)
+- **Kong 3-phase attack** — direct flood (chaos) → Kong without JWT (all 401s) → valid JWT rate limited (429 after 60 req/min). Watch all three live in Grafana.
 
 ---
 

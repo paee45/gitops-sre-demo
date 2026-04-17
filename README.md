@@ -1,19 +1,24 @@
-# �️ gitops-sre-demo
+# 🤖 AI-Assisted GitOps SRE Platform
 
-> **Work in progress.** This is a personal weekend / after-hours project where I get to wire up all the tools I find interesting and see how far I can push a single-node cluster. Pull up a chair — it's a fun one.
+**gitops-sre-demo** — a personal side project exploring what it looks like when AI is a first-class citizen in a real SRE/GitOps platform, not an add-on.
+
+> **Work in progress.** The goal: build a system where an LLM can actually *help* during an incident — not by guessing, but by querying real runbooks, alert history, and live cluster context. Everything else (GitOps, CI/CD, observability) is the foundation that makes that possible.
+>
+> Runs on a **single k3d cluster** (or EC2 t3.medium). No giant infra bill required.
 
 ---
 
-## 🤔 Why Does This Exist?
+## 🤔 Why This Project?
 
-I got tired of working on systems where observability was bolted on as an afterthought. I wanted a playground where I could:
+Most "AI for DevOps" demos are chatbots that don't know anything about your actual system. I wanted to build the opposite: a platform where the AI assistant has *grounded context* — your alert rules, your runbooks, your recent incident logs, your Grafana dashboards — and can answer questions that are actually useful during an outage.
 
-- **See every signal at once** — traces, logs, and metrics all correlated, not siloed in three different dashboards
-- **Understand what "safe deployment" actually means** — not just "it deployed", but SLO gauges staying green *after* the rollout
-- **Break things on purpose** — flood an API with requests, watch it fail, put a Kong gateway in front, and watch it hold
-- **Play with AI in a real operational context** — not chatbot demos, but plugging an LLM into actual alert/runbook/incident data and seeing if it's useful
+To make that work, you need solid foundations:
+- **Structured observability** — metrics, logs, and traces that are correlated and queryable
+- **Reliable GitOps delivery** — so you know exactly what changed and when
+- **Real alerting** — not noise, but signal with attached runbooks the AI can retrieve
+- **A RAG layer** — to give the LLM project-specific context instead of hallucinating
 
-Everything runs on a **single k3d cluster** (or an EC2 t3.medium if you want it in the cloud). No giant infra bill, no team required.
+This project builds all of that from scratch, on a single node, end to end.
 
 ---
 
